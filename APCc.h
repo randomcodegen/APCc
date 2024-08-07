@@ -52,6 +52,11 @@ struct AP_NetworkPlayer {
     char* game;
 };
 
+struct AP_GameData {
+    GHashTable* item_data;
+    GHashTable* location_data;
+};
+
 typedef enum {
     Pending, Done, Error
 } AP_RequestStatus;
@@ -86,6 +91,9 @@ void AP_DataStorageOperation_free(struct AP_DataStorageOperation* operation_stru
 struct AP_RoomInfo* AP_RoomInfo_new(struct AP_NetworkVersion version, GArray* tags, bool password_required, GHashTable* permissions, int hint_cost, int location_check_points, GArray* games ,GHashTable* datapackage_checksums, const char* seed_name, double time);
 void AP_RoomInfo_free(struct AP_RoomInfo* room_info);
 
+struct AP_GameData* AP_GameData_new(GHashTable* item_data, GHashTable* location_data);
+void AP_GameData_free(struct AP_GameData* game_data);
+
 // Set current client version
 void AP_SetClientVersion(struct AP_NetworkVersion* version);
 
@@ -118,6 +126,7 @@ void AP_RegisterSlotDataJSONObjectCallback(char*, void (*f_slotdata)(json_t*));
 // Send LocationScouts packet
 //void AP_SendLocationScouts(std::vector<int64_t> const& locations, int create_as_hint);
 void AP_SendLocationScouts(GArray* locations, int create_as_hint);
+void AP_SendLocationScout(uint64_t location, int create_as_hint);
 // Receive Function for LocationInfo
 //void AP_SetLocationInfoCallback(void (*f_locrecv)(std::vector<AP_NetworkItem>));
 void AP_SetLocationInfoCallback(void (*f_locrecv)(GArray*));
@@ -272,7 +281,6 @@ GString* AP_GetPrivateServerDataPrefix();
 void AP_RegisterSetReplyCallback(void (*f_setreply)(AP_SetReply));
 
 // Receive all SetReplys with Keys in parameter list
-//void AP_SetNotify(std::map<std::string, AP_DataType>);
-void AP_SetNotify(GHashTable*);
+void AP_SetNotify_Keylist(GHashTable* keylist);
 // Single Key version of above for convenience
-void AP_SetNotify(char*, AP_DataType);
+void AP_SetNotify_Type(char* key, AP_DataType type);

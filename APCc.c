@@ -6,6 +6,7 @@ bool sp_testing = false;
 // Callbacks
 void f_itemclr(); 
 void f_locrecv(uint64_t loc_id);
+void f_locinfrecv(GArray* a);
 void f_checksum(char* checksum);
 void f_array(GArray* a);
 void f_goal(int);
@@ -298,6 +299,23 @@ void AP_SetReply_free(struct AP_SetReply* reply) {
     }
 }
 
+struct AP_GameData* AP_GameData_new(GHashTable* item_data, GHashTable* location_data) {
+    struct AP_GameData* game_data = (struct AP_GameData*)malloc(sizeof(struct AP_GameData));
+    if (game_data != NULL) {
+        game_data->item_data = item_data;
+        game_data->location_data = location_data;
+    }
+    return game_data;
+}
+
+void AP_GameData_free(struct AP_GameData* game_data) {
+    if (game_data != NULL) {
+        if (game_data->item_data) g_hash_table_destroy(game_data->item_data);
+        if (game_data->location_data) g_hash_table_destroy(game_data->location_data);
+        free(game_data);
+    }
+}
+
 struct AP_DataStorageOperation* AP_DataStorageOperation_new(const char* operation, void* value) {
     struct AP_DataStorageOperation* operation_struct = (struct AP_DataStorageOperation*)malloc(sizeof(struct AP_DataStorageOperation));
     if (operation_struct != NULL) {
@@ -411,6 +429,7 @@ GArray* map_players = NULL;
 GHashTable* map_location_id_name = NULL;
 //std::map<std::pair<std::string, int64_t>, std::string> map_item_id_name;
 GHashTable* map_item_id_name = NULL;
+GHashTable* map_game_to_data = NULL;
 
 // Callback function pointers
 void (*resetItemValues)();
@@ -458,8 +477,8 @@ json_t* sp_ap_root;
 void AP_Init_Generic();
 bool parse_response(char* msg);
 void APSend(char* req);
-char* getItemName(uint64_t* id);
-char* getLocationName(uint64_t* id);
+char* getItemName(char* gamename, uint64_t* id);
+char* getLocationName(char* gamename, uint64_t* id);
 void parseDataPkg(json_t* new_datapkg);
 void parseDataPkgCache();
 struct AP_NetworkPlayer* getPlayer(int team, int slot);
@@ -468,7 +487,7 @@ GArray* messageParts = NULL;
 char* messagePartsToPlainText(GArray* messageParts);
 // PRIV Func Declarations End
 
-// websocket test
+// websocket
 static struct json_t* rec_in;
 struct lws_context* context;
 
@@ -482,8 +501,6 @@ enum protocols
 
 static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len)
 {
-    //if (reason > 36 || reason < 34) { printf("Callback Reason: %i\n", reason); }
-    
     switch (reason)
     {
     case LWS_CALLBACK_CLIENT_ESTABLISHED:
@@ -504,14 +521,12 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             }
             else 
             {
-                //printf("New message_buffer gstring.\n");
                 message_buffer = g_string_new(NULL);
             }
             
             //Append First fragment after reinitializing buffer
             if (remaining != remaining_prev)
             {
-                //printf("Append first element.\n");
                 g_string_append(message_buffer, (gchar*)in);
                 remaining = remaining_prev;
             }
@@ -520,7 +535,6 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
         {
             g_string_append(message_buffer, (gchar*)in);
             remaining_prev = remaining;
-            //printf("Message Buffer Final: %s\n", message_buffer->str);
             parse_response((char*)message_buffer->str);
         }
         if (!lws_is_first_fragment(wsi) && !lws_is_final_fragment(wsi))
@@ -528,7 +542,6 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             //if middle fragment, append to buffer
             if (remaining != remaining_prev) 
             {
-                //printf("Append Middle Element.\n");
                 g_string_append(message_buffer, (gchar*)in);
                 remaining_prev = remaining;
             }
@@ -536,7 +549,6 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
         break;
 
     case LWS_CALLBACK_CLIENT_WRITEABLE:
-        //printf("Call to writbable.\n");
         for (int i = 0; i < outgoing_queue->length; i++) 
         {
             json_t* json_out = g_queue_pop_head(outgoing_queue);
@@ -544,7 +556,6 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             json_print("json_out", json_out);
             char* msg_out = json_dumps(json_out, 0);
             lws_write(wsi, msg_out, strlen(msg_out), LWS_WRITE_TEXT);
-            getchar();
         }
         /*TODO: Look into buffer for better send optimization. 
         Doc Example:
@@ -620,8 +631,6 @@ static struct lws_protocols protocols[] =
     LWS_PROTOCOL_LIST_TERM /* terminator */
 };
 
-// websocket test end
-
 
 void AP_SetClientVersion(struct AP_NetworkVersion* version) {
     if (!client_version) { client_version = AP_NetworkVersion_new(0, 2, 6); }
@@ -632,7 +641,7 @@ void AP_SetClientVersion(struct AP_NetworkVersion* version) {
 
 //TODO: Implement SP
 void AP_SendItem(uint64_t idx) {
-    printf("AP: Checked '%s'. Informing Archipelago...\n", getLocationName(idx));
+    printf("AP: Checked '%s'. Informing Archipelago...\n", getLocationName(ap_game, idx));
     if (multiworld) {
         json_t* req_t = json_object();
         json_t* req_array = json_array();
@@ -703,6 +712,34 @@ void AP_SendLocationScouts(GArray* locations, int create_as_hint) {
     }
 }
 
+void AP_SendLocationScout(uint64_t location, int create_as_hint) {
+    if (multiworld) {
+        json_t* req_t = json_object();
+        json_t* req_array = json_array();
+        json_t* req_locations_array = json_array();
+        json_object_set_new(req_t, "cmd", json_string("LocationScouts"));
+        json_array_append_new(req_locations_array, json_integer(location));
+        json_object_set_new(req_t, "locations", req_locations_array);
+        json_object_set_new(req_t, "create_as_hint", json_boolean(create_as_hint));
+        json_array_append_new(req_array, req_t);
+        g_queue_push_tail(outgoing_queue, req_array);
+    }
+    else {
+        /*
+        Json::Value fake_msg;
+        fake_msg[0]["cmd"] = "LocationInfo";
+        fake_msg[0]["locations"] = Json::arrayValue;
+        for (int64_t loc : locations) {
+            Json::Value netitem;
+            netitem["item"] = sp_ap_root["location_to_item"].get(std::to_string(loc), 0).asInt64();
+            netitem["location"] = loc;
+            netitem["player"] = ap_player_id;
+            netitem["flags"] = 0b001; // Hardcoded for SP seeds.
+            fake_msg[0]["locations"].append(netitem);
+        }*/
+    }
+}
+
 void AP_StoryComplete() {
     if (!multiworld) return;
     json_t* req_t = json_object();
@@ -713,7 +750,6 @@ void AP_StoryComplete() {
     g_queue_push_tail(outgoing_queue, req_array);
 }
 
-//TODO: Test DeathLink Packet
 void AP_DeathLinkSend() {
     if (!enable_deathlink || !multiworld) return;
     if (cur_deathlink_amnesty > 0) {
@@ -740,7 +776,7 @@ void AP_DeathLinkSend() {
     g_queue_push_tail(outgoing_queue, req_array);
 }
 
-//TODO: Test SP
+//TODO: Implement SP
 void AP_Init_SP(const char* filename) {
     multiworld = false;
     char sp_save_buf[sizeof(".save") + sizeof(filename)];
@@ -834,6 +870,7 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     AP_SetItemRecvCallback(f_itemrecv);
     AP_SetItemClearCallback(f_itemclr);
     AP_SetLocationCheckedCallback(f_locrecv);
+    AP_SetLocationInfoCallback(f_locinfrecv);
     //end func defs
 
 
@@ -892,18 +929,14 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
             ccinfo.host = ccinfo.address;
             ccinfo.origin = "origin";
             ccinfo.protocol = protocols[PROTOCOL_AP].name;
-            
             web_socket = lws_client_connect_via_info(&ccinfo);
-
-            
         }
-
-        lws_service(context, 50);
-        
-        if (outgoing_queue->length > 0)
+        lws_service(context, 0);
+        if (web_socket)
         {
             lws_callback_on_writable(web_socket);
         }
+        Sleep(250);
     }
 }
 
@@ -923,7 +956,6 @@ bool parse_response(char* msg)
     struct json_t* root = json_loads(msg, 0, &jerror);
     if (!root) { printf("Error parsing incoming request: %s\n", jerror.text); return 0; }
     json_print("Incoming:", root);
-    getchar();
     // Received a valid json
     for (int i = 0; i < json_array_size(root); i++)
     {
@@ -1107,11 +1139,10 @@ bool parse_response(char* msg)
                 json_t* slot_data_obj;
                 json_object_foreach(temp_obj, k, v)
                 {
-                    if (loop_obj = json_object_get(v, "death_link")) { enable_deathlink = (json_boolean_value(loop_obj) && deathlinksupported); }
-                    else if (loop_obj = json_object_get(v, "DeathLink")) { enable_deathlink = (json_boolean_value(loop_obj) && deathlinksupported); }
-                    if (loop_obj = json_object_get(v, "death_link_amnesty")) { deathlink_amnesty = json_integer_value(loop_obj); cur_deathlink_amnesty = deathlink_amnesty; }
-                    else if (loop_obj = json_object_get(v, "DeathLink_Amnesty")) { deathlink_amnesty = json_integer_value(loop_obj); cur_deathlink_amnesty = deathlink_amnesty; }
-                    json_decref(loop_obj);
+                    if (!strcmp("death_link", k)) { enable_deathlink = json_integer_value(json_object_get(temp_obj, k)) && deathlinksupported; }
+                    else if(!strcmp("DeathLink", k)) { enable_deathlink = json_integer_value(json_object_get(temp_obj, k)) && deathlinksupported; }
+                    if (!strcmp("death_link_amnesty", k)) { deathlink_amnesty = json_integer_value(json_object_get(temp_obj, k)); cur_deathlink_amnesty = deathlink_amnesty; }
+                    else if (!strcmp("DeathLink_Amnesty", k)) { deathlink_amnesty = json_integer_value(json_object_get(temp_obj, k)); cur_deathlink_amnesty = deathlink_amnesty; }
                 }
                 // Iterate over keys we are searching for callbacks
                 for (int i = 0; i < slotdata_strings->len; i++)
@@ -1186,14 +1217,13 @@ bool parse_response(char* msg)
             
             if (enable_deathlink && deathlinksupported)
             {
-                //TODO: Test this with active deathlink
                 json_t* setdeathlink = json_object();
                 json_t* tagsarray = json_array();
                 json_object_set_new(setdeathlink, "cmd", json_string("ConnectUpdate"));
                 json_array_append_new(tagsarray, json_string("DeathLink"));
                 json_object_set_new(setdeathlink, "tags", tagsarray);
                 json_array_append_new(request, setdeathlink);
-                printf("Created Deathlink Request:"); json_print("", request);
+                json_print("", request);
             }
             
             bool cache_outdated = false;
@@ -1364,7 +1394,7 @@ bool parse_response(char* msg)
                     struct AP_NetworkPlayer* recv_player = getPlayer(0, json_integer_value(rec_obj));
                     struct AP_NetworkPlayer* recv_item_player = getPlayer(0, json_integer_value(item_recvplayer_obj));
                     if (!strcmp(recv_player->alias, local_player->alias) || (strcmp(recv_item_player->alias, local_player->alias))) { continue; }
-                    char* item_name = getItemName(item_id);
+                    char* item_name = getItemName(ap_game, item_id);
                     GArray* messageparts_array = g_array_new(true, true, sizeof(struct AP_MessagePart*));
                     struct AP_MessagePart* msg_p = AP_MessagePart_new(item_name, AP_ItemText);
                     g_array_append_val(messageparts_array, msg_p);
@@ -1385,8 +1415,8 @@ bool parse_response(char* msg)
                     json_t* found_obj = json_object_get(obj, "found");
                     struct AP_NetworkPlayer* send_player = getPlayer(0, json_integer_value(item_recvplayer_obj));
                     struct AP_NetworkPlayer* recv_player = getPlayer(0, json_integer_value(rec_obj));
-                    char* item_name = getItemName(item_id);
-                    char* loc_name = getLocationName(loc_id);
+                    char* item_name = getItemName(ap_game, item_id);
+                    char* loc_name = getLocationName(ap_game, loc_id);
                     bool checked = json_boolean_value(found_obj);
                     GArray* messageparts_array = g_array_new(true, true, sizeof(struct AP_MessagePart*));
                     struct AP_MessagePart* msg_p = AP_MessagePart_new("Item ", AP_NormalText);
@@ -1427,13 +1457,14 @@ bool parse_response(char* msg)
                 {
                     GString* text = g_string_new(NULL);
                     json_t* data_obj = json_object_get(obj, "data");
-                    char* k;
+                    int i;
                     json_t* v;
-                    json_object_foreach(data_obj, k, v)
+                    json_array_foreach(data_obj, i, v)
                     { 
-                        json_t* text_obj = json_object_get(data_obj, "text");
-                        json_t* type_obj = json_object_get(data_obj, "type");
-                        if (!strcmp(json_string_value(type_obj), "player_id")) {
+                        json_t* text_obj = json_object_get(v, "text");
+                        json_t* type_obj = json_object_get(v, "type");
+                        //TODO: Check if alias works correctly
+                        if (type_obj && !strcmp(json_string_value(type_obj), "player_id")) {
                             g_string_append(text, getPlayer(0, json_integer_value(text_obj))->alias);
                         }
                         else if (strcmp(json_string_value(text_obj),"")) 
@@ -1464,7 +1495,7 @@ bool parse_response(char* msg)
                 struct AP_NetworkPlayer* player = getPlayer(0, p_id);
                 json_t* flags_obj = json_object_get(v, "flags");
                 int flags = json_integer_value(flags_obj);
-                struct AP_NetworkItem* item = AP_NetworkItem_new(item_id, loc_id, player->slot, flags, getItemName(item_id), getLocationName(loc_id), player->alias);
+                struct AP_NetworkItem* item = AP_NetworkItem_new(item_id, loc_id, player->slot, flags, getItemName(ap_game, item_id), getLocationName(ap_game, loc_id), player->alias);
                 g_array_append_val(locations, item);
             }
             locinfofunc(locations);
@@ -1486,7 +1517,7 @@ bool parse_response(char* msg)
                 struct AP_NetworkPlayer* sender = getPlayer(0, json_integer_value(player_obj));
                 (*getitemfunc)(item_id, sender->slot, notify);
                 if (queueitemrecvmsg && notify) {
-                    char* item_name = getItemName(item_id);
+                    char* item_name = getItemName(ap_game, item_id);
                     GArray* messageparts_array = g_array_new(true, true, sizeof(struct AP_MessagePart*));
                     struct AP_MessagePart* msg_p = AP_MessagePart_new("Received ", AP_NormalText);
                     g_array_append_val(messageparts_array, msg_p);
@@ -1513,7 +1544,6 @@ bool parse_response(char* msg)
             struct AP_DataStorageOperation* replace_op = AP_DataStorageOperation_new("replace", &last_item_idx);
             GArray* operations_array = g_array_new(true, true, sizeof(struct AP_DataStorageOperation*));
             g_array_append_val(operations_array, replace_op);
-            //TODO: set reply to false (last param)
             struct AP_SetServerDataRequest* requ = AP_SetServerDataRequest_new(Pending, resync_key->str, operations_array, 0, Int, false);
             AP_SetServerData(requ);
         }
@@ -1604,9 +1634,11 @@ void AP_Shutdown() {
     //TODO: free the individual structs in the arrays and hash_tables as well
     map_players = g_array_new(true, true, sizeof(struct AP_NetworkPlayer*));
     g_hash_table_destroy(map_location_id_name);
-    map_location_id_name = g_hash_table_new(g_direct_hash, g_direct_equal);
+    map_location_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
     g_hash_table_destroy(map_item_id_name);
-    map_item_id_name = g_hash_table_new(g_direct_hash, g_direct_equal);
+    map_item_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
+    g_hash_table_destroy(map_game_to_data);
+    map_game_to_data = g_hash_table_new(g_string_hash, g_string_equal);
     resetItemValues = NULL;
     getitemfunc = NULL;
     checklocfunc = NULL;
@@ -1617,7 +1649,7 @@ void AP_Shutdown() {
     int last_item_idx = 0;
     sp_save_path="";
     g_hash_table_destroy(map_server_data);
-    map_server_data = g_hash_table_new(g_direct_hash, g_direct_equal);
+    map_server_data = g_hash_table_new(g_string_hash, g_string_equal);
     g_hash_table_destroy(map_slotdata_callback_int);
     map_slotdata_callback_int = g_hash_table_new(g_string_hash, g_string_equal);
     g_hash_table_destroy(map_slotdata_callback_raw);
@@ -1628,7 +1660,7 @@ void AP_Shutdown() {
     slotdata_strings = g_array_new(true, true, sizeof(char*));
 }
 
-// TODO: Remove these testing funcs
+// TODO: Remove these testing callback funcs
 // Callbacks
 void f_array(GArray* a)
 {
@@ -1659,42 +1691,31 @@ void f_goal(int goal)
 void f_itemclr()
 {
     printf("Call to f_itemclr\n");
-    // TODO: Implement in own lib
 }
 
 void f_checksum(char* checksum)
 {
     printf("Call to f_checksum: %s\n", checksum);
-    // TODO: Implement in own lib
+}
+
+void f_locinfrecv(GArray* a)
+{
+    printf("Call to f_locinfrecv\n");
+    for (int i = 0; i < a->len; i++)
+    {
+        struct AP_NetworkItem* netitem = g_array_index(a, struct AP_NetworkItem*, i);
+        printf("Flags: %zu\n", netitem->flags);
+        printf("ItemName: %s\n", netitem->itemName);
+        printf("LocationName: %s\n", netitem->locationName);
+    }
 }
 
 void f_locrecv(uint64_t loc_id)
 {
-    //printf("Call to f_locrec with %zu\n", loc_id);
-    //getchar();
-    /* Find where this location is
-    int ep = -1;
-    int map = -1;
-    int index = -1;
-    if (!find_location(loc_id, ep, map, index))
-    {
-        printf("APDOOM: In f_locrecv, loc id not found: %i\n", (int)loc_id);
-        return; // Loc not found
-    }
-
-    ap_level_index_t idx = { ep - 1, map - 1 };
-
-    // Make sure we didn't already check it
-    if (is_loc_checked(idx, index)) return;
-    if (index < 0) return;
-
-    auto level_state = ap_get_level_state(idx);
-    level_state->checks[level_state->check_count] = index;
-    level_state->check_count++;
-    */
+    printf("Call to f_locrec with %zu\n", loc_id);
 }
 
-// End of testing funcs
+// End of testing callback funcs
 
 
 void AP_EnableQueueItemRecvMsgs(bool b) {
@@ -1849,7 +1870,6 @@ void AP_SetServerData(struct AP_SetServerDataRequest* request) {
             json_t* op_obj = json_object();
             struct AP_DataStorageOperation* ap_dso = g_array_index(request->operations, struct AP_DataStorageOperation*, i);
             json_object_set_new(op_obj, "operation", json_string(ap_dso->operation));
-            //double n = *(double*)ap_dso->value;
             json_object_set_new(op_obj, "value", json_real(*(double*)ap_dso->value));
             json_array_append_new(op_array, op_obj);
         }
@@ -1865,7 +1885,6 @@ void AP_SetServerData(struct AP_SetServerDataRequest* request) {
             json_array_append_new(op_array, op_obj);
         }
         json_object_set_new(req_t, "operations", op_array);
-        //json_t* default_obj = json_object();
         json_object_set_new(req_t, "default", json_string((char*)request->default_value));
         break;
     }
@@ -1975,26 +1994,36 @@ struct AP_NetworkPlayer* getPlayer(int team, int slot) {
     return g_array_index(map_players, struct AP_NetworkPlayer*, slot);
 }
 
-char* getItemName(uint64_t* id) {
-    if (g_hash_table_lookup(map_item_id_name, &id))
-    {
-        return (char*)g_hash_table_lookup(map_item_id_name, &id);
+char* getItemName(char* gamename, uint64_t* id) {
+    GString* gs_key = g_string_new(gamename);
+    if (g_hash_table_lookup(map_game_to_data, gs_key)) {
+        struct AP_GameData* gamedata = g_hash_table_lookup(map_game_to_data, gs_key);
+        if (g_hash_table_lookup(gamedata->item_data, &id))
+        {
+            return (char*)g_hash_table_lookup(gamedata->item_data, &id);
+        }
+        else
+        {
+            return "Unknown Item";
+        }
     }
-    else
-    {
-        return "Unknown Item";
-    }
+    else { printf("Gamename %s not found",gamename); }
 }
 
-char* getLocationName(uint64_t* id) {
-    if (g_hash_table_lookup(map_location_id_name, &id))
-    {
-        return (char*)g_hash_table_lookup(map_location_id_name, &id);
+char* getLocationName(char* gamename, uint64_t* id) {
+    GString* gs_key = g_string_new(gamename);
+    if (g_hash_table_lookup(map_game_to_data, gs_key)) {
+        struct AP_GameData* gamedata = g_hash_table_lookup(map_game_to_data, gs_key);
+        if (g_hash_table_lookup(gamedata->location_data, &id))
+        {
+            return (char*)g_hash_table_lookup(gamedata->location_data, &id);
+        }
+        else
+        {
+            return "Unknown Location";
+        }
     }
-    else
-    {
-        return "Unknown Location";
-    }
+    else { printf("Gamename %s not found", gamename); }
 }
 
 void parseDataPkgCache() {
@@ -2004,8 +2033,9 @@ void parseDataPkgCache() {
     }
     else
     {
-        if (!map_item_id_name) { map_item_id_name = g_hash_table_new(g_int64_hash, g_int64_equal); }
+        /*if (!map_item_id_name) { map_item_id_name = g_hash_table_new(g_int64_hash, g_int64_equal); }
         if (!map_location_id_name) { map_location_id_name = g_hash_table_new(g_int64_hash, g_int64_equal); }
+        if (!map_game_to_data) { map_game_to_data = g_hash_table_new(g_string_hash, g_string_equal); }*/
         printf("Parsing Datapackage Cache.\n");
         json_t* cache_games_obj = json_object_get(datapkg_cache, "games");
         json_t* items_obj;
@@ -2018,6 +2048,10 @@ void parseDataPkgCache() {
         json_t* locv;
         json_object_foreach(cache_games_obj, k, v)
         {
+            map_item_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
+            map_location_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
+            map_game_to_data = g_hash_table_new(g_string_hash, g_string_equal);
+            struct AP_GameData* game_data = AP_GameData_new(map_item_id_name, map_location_id_name);
             //printf("Game: %s\n", k);
             items_obj = json_object_get(v, "item_name_to_id");
             locs_obj = json_object_get(v, "location_name_to_id");
@@ -2028,7 +2062,6 @@ void parseDataPkgCache() {
                 uint64_t* key = malloc(sizeof(uint64_t));
                 *key = json_integer_value(itemv);
                 g_hash_table_insert(map_item_id_name, key, _strdup(itemk));
-
             }
             json_object_foreach(locs_obj, lock, locv)
             {
@@ -2036,6 +2069,8 @@ void parseDataPkgCache() {
                 *key = json_integer_value(locv);
                 g_hash_table_insert(map_location_id_name, key, _strdup(lock));
             }
+            GString* gs_key = g_string_new(k);
+            g_hash_table_insert(map_game_to_data, gs_key, game_data);
         }
         data_synced = true;
     }
@@ -2045,7 +2080,6 @@ void parseDataPkg(json_t* new_datapkg) {
     if (!new_datapkg)
     {
         printf("parseDataPkg received null ptr.\n");
-        getchar();
     }
     else if (!datapkg_cache)
     {
