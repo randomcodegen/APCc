@@ -13,9 +13,9 @@
 #include <glib.h>
 
 // Helpers
-char* print_json(char* name, json_t* j);
+void json_print(char* key, json_t* j);
 
-void AP_Init(const char* ip, const int port, const char* game, const char* player_name, const char* passwd);
+void AP_Init(char* ip, int port, char* game, char* player_name, char* passwd);
 bool AP_IsInit();
 
 void AP_Start();
@@ -118,7 +118,7 @@ void AP_SetLocationCheckedCallback(void (*f_locrecv)(uint64_t));
 void AP_SetDeathLinkRecvCallback(void (*f_deathrecv)());
 
 // Parameter Function receives Slotdata of respective type
-void AP_RegisterSlotDataIntCallback(char*, void (*f_slotdata)(int));
+void AP_RegisterSlotDataIntCallback(char*, void (*f_slotdata)(uint64_t));
 void AP_RegisterSlotDataIntArrayCallback(char*, void (*f_slotdata)(GArray*));
 void AP_RegisterSlotDataRawCallback(char*, void (*f_slotdata)(char*));
 void AP_RegisterSlotDataJSONObjectCallback(char*, void (*f_slotdata)(json_t*));
@@ -161,7 +161,7 @@ struct AP_MessagePart {
 struct AP_Message {
     AP_MessageType type;
     char* text;
-    struct AP_MessagePart* messageParts;
+    GArray* messageParts;
 };
 
 struct AP_ItemSendMessage {
@@ -194,7 +194,7 @@ struct AP_CountdownMessage {
 
 bool AP_IsMessagePending();
 void AP_ClearLatestMessage();
-struct AP_Message* AP_GetLatestMessage();
+void* AP_GetLatestMessage();
 
 /* Connection Information Types */
 
@@ -229,7 +229,7 @@ struct AP_RoomInfo {
 int AP_GetRoomInfo(struct AP_RoomInfo*);
 AP_ConnectionStatus AP_GetConnectionStatus();
 AP_DataPackageSyncStatus AP_GetDataPackageStatus();
-int AP_GetUUID();
+uint64_t AP_GetUUID();
 int AP_GetPlayerID();
 
 /* Serverside Data Types */
@@ -278,7 +278,7 @@ GString* AP_GetPrivateServerDataPrefix();
 // Parameter Function receives all SetReply's
 // ! Pointers in AP_SetReply struct only valid within function !
 // If values are required beyond that a copy is needed
-void AP_RegisterSetReplyCallback(void (*f_setreply)(AP_SetReply));
+void AP_RegisterSetReplyCallback(void (*f_setreply)(struct AP_SetReply* reply));
 
 // Receive all SetReplys with Keys in parameter list
 void AP_SetNotify_Keylist(GHashTable* keylist);
