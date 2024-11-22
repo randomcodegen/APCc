@@ -395,11 +395,11 @@ bool isSSL = true;
 bool ssl_success = false;
 bool data_synced = false;
 int ap_player_id;
-char* ap_player_name;
-char* ap_ip;
+const char* ap_player_name;
+const char* ap_ip;
 int ap_port;
-char* ap_game;
-char* ap_passwd;
+const char* ap_game;
+const char* ap_passwd;
 uint64_t ap_uuid = 0;
 GRand* seeded_rand;
 
@@ -479,8 +479,8 @@ json_t* sp_ap_root;
 void AP_Init_Generic();
 bool parse_response(char* msg);
 //void APSend(char* req);
-char* getItemName(char* gamename, uint64_t id);
-char* getLocationName(char* gamename, uint64_t id);
+char* getItemName(const char* gamename, uint64_t id);
+char* getLocationName(const char* gamename, uint64_t id);
 void parseDataPkg(json_t* new_datapkg);
 void parseDataPkgCache();
 struct AP_NetworkPlayer* getPlayer(int team, int slot);
@@ -642,7 +642,7 @@ void AP_SetClientVersion(struct AP_NetworkVersion* version) {
 
 //TODO: Implement SP
 void AP_SendItem(uint64_t idx) {
-    printf("AP: Checked '%s'. Informing Archipelago...\n", getLocationName(ap_game, idx));
+    printf("AP: Checked '%s'. Informing Archipelago...\n", getLocationName((char*)ap_game, idx));
     if (multiworld) {
         json_t* req_t = json_object();
         json_t* req_array = json_array();
@@ -848,7 +848,7 @@ void AP_Start() {
     }
 }
 
-void AP_Init(char* ip, int port, char* game, char* player_name, char* passwd)
+void AP_Init(const char* ip, int port, const char* game, const char* player_name, const char* passwd)
 {
     multiworld = true;
     if (!slotdata_strings) { slotdata_strings = g_array_new(true, true, sizeof(GString*)); }
@@ -875,15 +875,6 @@ void AP_Init(char* ip, int port, char* game, char* player_name, char* passwd)
     AP_SetLocationInfoCallback(f_locinfrecv);
     //end func defs
 
-
-    if (!strcmp(ip, "")) {
-        ip = "127.0.0.1";
-        port = 38281;
-        printf("AP: Using default Server Adress: '%s'\n", ip);
-    }
-    else {
-        printf("AP: Using Server Adress: '%s'\n", ip);
-    }
     ap_ip = ip;
     ap_port = port;
     ap_game = game;
@@ -1998,7 +1989,7 @@ struct AP_NetworkPlayer* getPlayer(int team, int slot) {
     return g_array_index(map_players, struct AP_NetworkPlayer*, slot);
 }
 
-char* getItemName(char* gamename, uint64_t id) {
+char* getItemName(const char* gamename, uint64_t id) {
     GString* gs_key = g_string_new(gamename);
     if (g_hash_table_lookup(map_game_to_data, gs_key)) {
         struct AP_GameData* gamedata = g_hash_table_lookup(map_game_to_data, gs_key);
@@ -2019,7 +2010,7 @@ char* getItemName(char* gamename, uint64_t id) {
     }
 }
 
-char* getLocationName(char* gamename, uint64_t id) {
+char* getLocationName(const char* gamename, uint64_t id) {
     GString* gs_key = g_string_new(gamename);
     if (g_hash_table_lookup(map_game_to_data, gs_key)) {
         struct AP_GameData* gamedata = g_hash_table_lookup(map_game_to_data, gs_key);

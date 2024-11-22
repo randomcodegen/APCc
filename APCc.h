@@ -15,7 +15,7 @@
 // Helpers
 void json_print(char* key, json_t* j);
 
-void AP_Init(char* ip, int port, char* game, char* player_name, char* passwd);
+void AP_Init(const char* ip, int port, const char* game, const char* player_name, const char* passwd);
 bool AP_IsInit();
 
 void AP_Start();
