@@ -19,7 +19,6 @@ void json_print(char* key, json_t* j)
 {
     char* jdump = json_dumps(j, JSON_DECODE_ANY);
     printf("%s: %s\n", key, jdump);
-    free(jdump);
 }
 
 const char* jtype_to_string(json_t* j) 
