@@ -393,6 +393,7 @@ bool multiworld = true;
 bool isSSL = true;
 bool ssl_success = false;
 bool data_synced = false;
+bool ap_ready = false;
 int ap_player_id;
 const char* ap_player_name;
 const char* ap_ip;
@@ -796,6 +797,7 @@ bool AP_IsInit() {
 ////TODO: Implement SP, currently has no use in MP
 void AP_Start() {
     init = true;
+    ap_ready = true;
     if (multiworld) {
         // Websocket is handled by AP_Init
         //webSocket.start();
@@ -1066,6 +1068,8 @@ bool parse_response(char* msg)
             refused = false;
             
             printf("AP: Authenticated\n");
+            // Waiting for call to AP_Start()
+            while (!ap_ready) {   Sleep(250); }
             if (temp_obj = json_object_get(obj, "slot")) { ap_player_id = (int)json_integer_value(temp_obj); }
             if (temp_obj = json_object_get(obj, "checked_locations"))
             {
