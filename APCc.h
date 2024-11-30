@@ -12,9 +12,6 @@
 #include <libwebsockets.h>
 #include <glib.h>
 
-// Helpers
-void json_print(char* key, json_t* j);
-
 void AP_Init(const char* ip, int port, const char* game, const char* player_name, const char* passwd);
 bool AP_IsInit();
 
