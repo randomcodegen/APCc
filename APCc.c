@@ -3,16 +3,6 @@
 // For testing sp functions
 bool sp_testing = false;
 
-// Callbacks
-void f_itemclr(); 
-void f_locrecv(uint64_t loc_id);
-void f_locinfrecv(GArray* a);
-void f_checksum(char* checksum);
-void f_array(GArray* a);
-void f_goal(int);
-void f_object(json_t*);
-void f_itemrecv(uint64_t item_id, int player_id, bool notify_player);
-
 // Helper funcs
 
 const char* jtype_to_string(json_t* j) 
@@ -1246,6 +1236,7 @@ bool parse_response(char* msg)
                     if (g_hash_table_lookup(map_server_data, gs_key)) 
                     {
                         struct AP_GetServerDataRequest* target = g_hash_table_lookup(map_server_data, gs_key);
+                        if (json_is_null(v)) { target->value = NULL; target->status = Done; g_hash_table_remove(map_server_data, gs_key); break; }
                         switch (target->type)
                         {
                         case Int:
