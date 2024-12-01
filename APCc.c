@@ -966,7 +966,6 @@ bool parse_response(char* msg)
             
             if (temp_obj = json_object_get(obj, "seed_name")) { lib_room_info.seed_name = _strdup(json_string_value(temp_obj)); }
             if (temp_obj = json_object_get(obj, "time")) { lib_room_info.time = json_number_value(temp_obj); }
-            json_decref(temp_obj);
             if (!auth)
             {
                 json_t* req_t = json_object();
@@ -1049,7 +1048,6 @@ bool parse_response(char* msg)
                     loop_obj = json_object_get(v, "game");
                     g_array_index(map_players, struct AP_NetworkPlayer*, player_id)->game = _strdup(json_string_value(loop_obj));
                     player_id++;
-                    json_decref(loop_obj);
                 }
             }
             if (temp_obj = json_object_get(obj, "slot_data"))
@@ -1121,7 +1119,6 @@ bool parse_response(char* msg)
                             ((void(*)(json_t*))callback_func_ptr)(slot_data_obj);
                         }
                     }
-                    json_decref(slot_data_obj);
                 }
             }//end of slotdata parse
             
@@ -1209,7 +1206,6 @@ bool parse_response(char* msg)
                 json_array_append_new(request, sync_obj);
             }
             g_queue_push_tail(outgoing_queue, request);
-            json_decref(temp_obj);
             return true;
         }
         else if (cmd && !strcmp(cmd, "DataPackage")) 
@@ -1219,7 +1215,6 @@ bool parse_response(char* msg)
             json_object_set_new(sync_obj, "cmd", json_string("Sync"));
             json_array_append_new(request, sync_obj);
             g_queue_push_tail(outgoing_queue, request);
-            json_decref(temp_obj);
             return true;
         }
         else if (cmd && !strcmp(cmd, "Retrieved"))
