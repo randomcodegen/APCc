@@ -100,6 +100,10 @@ void AP_EnableQueueItemRecvMsgs(bool);
 
 void AP_SetDeathLinkSupported(bool);
 
+/* Name Lookup Functions */
+char* AP_GetLocationName(uint64_t id);
+char* AP_GetItemName(uint64_t id);
+
 /* Required Callback Functions */
 
 //Parameter Function must reset local state

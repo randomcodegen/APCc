@@ -1698,6 +1698,14 @@ int AP_GetPlayerID() {
     return ap_player_id;
 }
 
+char* AP_GetLocationName(uint64_t id) {
+    return getLocationName(ap_game, id);
+}
+
+char* AP_GetItemName(uint64_t id) {
+    return getItemName(ap_game, id);
+}
+
 void AP_SetServerData(struct AP_SetServerDataRequest* request) {
     if (!map_serverdata_typemanage) { map_serverdata_typemanage = g_hash_table_new(g_string_hash, g_string_equal); }
     request->status = Pending;
@@ -1848,6 +1856,11 @@ struct AP_NetworkPlayer* getPlayer(int team, int slot) {
 }
 
 char* getItemName(const char* gamename, uint64_t id) {
+    if (!map_game_to_data) {
+        printf("Game Lookup Table does not exist yet.\n");
+        return "Unknown Item";
+    }
+    
     GString* gs_key = g_string_new(gamename);
     if (g_hash_table_lookup(map_game_to_data, gs_key)) {
         struct AP_GameData* gamedata = g_hash_table_lookup(map_game_to_data, gs_key);
@@ -1869,6 +1882,11 @@ char* getItemName(const char* gamename, uint64_t id) {
 }
 
 char* getLocationName(const char* gamename, uint64_t id) {
+    if (!map_game_to_data) {
+        printf("Game Lookup Table does not exist yet.\n");
+        return "Unknown Item";
+    }
+    
     GString* gs_key = g_string_new(gamename);
     if (g_hash_table_lookup(map_game_to_data, gs_key)) {
         struct AP_GameData* gamedata = g_hash_table_lookup(map_game_to_data, gs_key);
