@@ -504,29 +504,21 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
                 if (message_buffer) {
                     g_string_free(message_buffer, true);
                 }
-                message_buffer = g_string_new(NULL);
+                message_buffer = g_string_new_len(NULL, len+remaining);
 
                 //Append First fragment after reinitializing buffer
-                if (remaining != remaining_prev)
-                {
-                    g_string_append(message_buffer, (gchar*)in);
-                    remaining = remaining_prev;
-                }
+                g_string_append_len(message_buffer, (gchar*)in, len);
+                if (remaining == 0) parse_response((char*)message_buffer->str);
             }
-            if (lws_is_final_fragment(wsi))
-            {
-                g_string_append(message_buffer, (gchar*)in);
-                remaining_prev = remaining;
-                parse_response((char*)message_buffer->str);
-            }
-            if (!lws_is_first_fragment(wsi) && !lws_is_final_fragment(wsi))
+            else if (!lws_is_first_fragment(wsi) && !lws_is_final_fragment(wsi))
             {
                 //if middle fragment, append to buffer
-                if (remaining != remaining_prev)
-                {
-                    g_string_append(message_buffer, (gchar*)in);
-                    remaining_prev = remaining;
-                }
+                g_string_append_len(message_buffer, (gchar*)in, len);
+            }
+            else if (lws_is_final_fragment(wsi))
+            {
+                g_string_append_len(message_buffer, (gchar*)in, len);
+                parse_response((char*)message_buffer->str);
             }
         }
         break;
