@@ -494,51 +494,49 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
         break;
 
     case LWS_CALLBACK_CLIENT_RECEIVE:
-        //Handle incoming packets
-        size_t remaining = lws_remaining_packet_payload(wsi);
+        if (in && len > 0)
+        {
+            //Handle incoming packets
+            size_t remaining = lws_remaining_packet_payload(wsi);
 
-        if (lws_is_first_fragment(wsi))
-        {
-            if (message_buffer)
+            if (lws_is_first_fragment(wsi))
             {
-                g_string_free(message_buffer, true);
+                if (message_buffer) {
+                    g_string_free(message_buffer, true);
+                }
                 message_buffer = g_string_new(NULL);
+
+                //Append First fragment after reinitializing buffer
+                if (remaining != remaining_prev)
+                {
+                    g_string_append(message_buffer, (gchar*)in);
+                    remaining = remaining_prev;
+                }
             }
-            else 
-            {
-                message_buffer = g_string_new(NULL);
-            }
-            
-            //Append First fragment after reinitializing buffer
-            if (remaining != remaining_prev)
-            {
-                g_string_append(message_buffer, (gchar*)in);
-                remaining = remaining_prev;
-            }
-        }
-        if (lws_is_final_fragment(wsi))
-        {
-            g_string_append(message_buffer, (gchar*)in);
-            remaining_prev = remaining;
-            parse_response((char*)message_buffer->str);
-        }
-        if (!lws_is_first_fragment(wsi) && !lws_is_final_fragment(wsi))
-        {
-            //if middle fragment, append to buffer
-            if (remaining != remaining_prev) 
+            if (lws_is_final_fragment(wsi))
             {
                 g_string_append(message_buffer, (gchar*)in);
                 remaining_prev = remaining;
+                parse_response((char*)message_buffer->str);
+            }
+            if (!lws_is_first_fragment(wsi) && !lws_is_final_fragment(wsi))
+            {
+                //if middle fragment, append to buffer
+                if (remaining != remaining_prev)
+                {
+                    g_string_append(message_buffer, (gchar*)in);
+                    remaining_prev = remaining;
+                }
             }
         }
         break;
 
     case LWS_CALLBACK_CLIENT_WRITEABLE:
-        for (guint i = 0; i < outgoing_queue->length; i++) 
+        while (outgoing_queue->length > 0) 
         {
             json_t* json_out = g_queue_pop_head(outgoing_queue);
             char* msg_out = json_dumps(json_out, 0);
-            lws_write(wsi, msg_out, strlen(msg_out), LWS_WRITE_TEXT);
+            if (msg_out) lws_write(wsi, (unsigned char*)msg_out, strlen(msg_out), LWS_WRITE_TEXT);
         }
         /*TODO: Look into buffer for better send optimization. 
         Doc Example:
