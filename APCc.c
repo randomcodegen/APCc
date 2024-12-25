@@ -594,7 +594,7 @@ void AP_SendItem(uint64_t idx) {
         json_array_append_new(req_locations_array, json_integer(idx));
         json_object_set_new(req_t, "locations", req_locations_array);
         json_array_append_new(req_array, req_t);
-        g_queue_push_tail(outgoing_queue, req_array);
+        g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
     }
     else {
         /*
@@ -637,7 +637,7 @@ void AP_SendLocationScouts(GArray* locations, int create_as_hint) {
         json_object_set_new(req_t, "locations", req_locations_array);
         json_object_set_new(req_t, "create_as_hint", json_boolean(create_as_hint));
         json_array_append_new(req_array, req_t);
-        g_queue_push_tail(outgoing_queue, req_array);
+        g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
     }
     else {
         /*
@@ -665,7 +665,7 @@ void AP_SendLocationScout(uint64_t location, int create_as_hint) {
         json_object_set_new(req_t, "locations", req_locations_array);
         json_object_set_new(req_t, "create_as_hint", json_boolean(create_as_hint));
         json_array_append_new(req_array, req_t);
-        g_queue_push_tail(outgoing_queue, req_array);
+        g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
     }
     else {
         /*
@@ -690,7 +690,7 @@ void AP_StoryComplete() {
     json_object_set_new(req_t, "cmd", json_string("StatusUpdate"));
     json_object_set_new(req_t, "status", json_integer(30));
     json_array_append_new(req_array, req_t);
-    g_queue_push_tail(outgoing_queue, req_array);
+    g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
 }
 
 void AP_DeathLinkSend() {
@@ -716,7 +716,7 @@ void AP_DeathLinkSend() {
     json_array_append_new(req_tags_array, json_string("DeathLink"));
     json_object_set_new(req_t, "tags", req_tags_array);
     json_array_append_new(req_array, req_t);
-    g_queue_push_tail(outgoing_queue, req_array);
+    g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
 }
 
 //TODO: Implement SP
@@ -985,7 +985,7 @@ bool parse_response(char* msg)
                 json_object_set_new(req_t, "version", version_obj);
                 json_object_set_new(req_t, "items_handling", json_integer(7));
                 json_array_append_new(request, req_t);
-                g_queue_push_tail(outgoing_queue, request);
+                g_queue_push_tail(outgoing_queue, json_deep_copy(request));
                 return true;
             }
             
@@ -1204,7 +1204,7 @@ bool parse_response(char* msg)
                 json_object_set_new(sync_obj, "cmd", json_string("Sync"));
                 json_array_append_new(request, sync_obj);
             }
-            g_queue_push_tail(outgoing_queue, request);
+            g_queue_push_tail(outgoing_queue, json_deep_copy(request));
             return true;
         }
         else if (cmd && !strcmp(cmd, "DataPackage")) 
@@ -1213,7 +1213,7 @@ bool parse_response(char* msg)
             json_t* sync_obj = json_object();
             json_object_set_new(sync_obj, "cmd", json_string("Sync"));
             json_array_append_new(request, sync_obj);
-            g_queue_push_tail(outgoing_queue, request);
+            g_queue_push_tail(outgoing_queue, json_deep_copy(request));
             return true;
         }
         else if (cmd && !strcmp(cmd, "Retrieved"))
@@ -1756,7 +1756,7 @@ void AP_SetServerData(struct AP_SetServerDataRequest* request) {
     if (multiworld)
     {
         json_array_append(req_array, req_t);
-        g_queue_push_tail(outgoing_queue, req_array);
+        g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
     }
     else if (sp_testing)
     {
@@ -1788,7 +1788,7 @@ void AP_SetNotify_Keylist(GHashTable* keylist) {
         g_hash_table_insert(map_serverdata_typemanage, gs_key, val);
     }
     json_array_append_new(req_array, req_t);
-    g_queue_push_tail(outgoing_queue, req_array);
+    g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
 }
 
 //TODO: Test SetNotify
@@ -1815,7 +1815,7 @@ void AP_GetServerData(struct AP_GetServerDataRequest* request) {
         json_array_append_new(req_key_array, json_string(request->key));
         json_object_set_new(req_t, "keys", req_key_array);
         json_array_append_new(req_array, req_t);
-        g_queue_push_tail(outgoing_queue, req_array);
+        g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
     }
     else if (sp_testing)
     {
