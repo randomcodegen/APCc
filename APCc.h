@@ -14,6 +14,7 @@
 
 void AP_Init(const char* ip, int port, const char* game, const char* player_name, const char* passwd);
 bool AP_IsInit();
+void AP_WebService();
 
 void AP_Start();
 void AP_Shutdown();

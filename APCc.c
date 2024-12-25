@@ -551,6 +551,7 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
 
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
         auth = false;
+        connected = false;
         web_socket = NULL;
         isSSL = !isSSL;
         break;
@@ -736,6 +737,38 @@ bool AP_IsInit() {
     return init;
 }
 
+void AP_WebService() {
+    /* Connect if we are not connected to the server. */
+    if (!web_socket)
+    {
+        size_t buffer_size = strlen("wss://") + strlen(ap_ip) + 1;
+        char* ip_buf = malloc(buffer_size);
+        struct lws_client_connect_info ccinfo;
+        memset(&ccinfo, 0, sizeof(ccinfo));
+        ccinfo.context = context;
+        if (isSSL) { sprintf(ip_buf, "%s%s", "wss://", ap_ip); ccinfo.address = ip_buf; ccinfo.ssl_connection = true; }
+        else { sprintf(ip_buf, "%s%s", "ws://", ap_ip); ccinfo.address = ip_buf; ccinfo.ssl_connection = false; }
+        ccinfo.address = ap_ip;
+        ccinfo.port = ap_port;
+        ccinfo.path = "/";
+        //ccinfo.host = lws_canonical_hostname(context);
+        ccinfo.host = ccinfo.address;
+        ccinfo.origin = "origin";
+        ccinfo.protocol = protocols[PROTOCOL_AP].name;
+        web_socket = lws_client_connect_via_info(&ccinfo);
+        while (!connected && web_socket)
+        {
+            lws_service(context, 0);
+            Sleep(100);
+        }
+    }
+    else if (web_socket)
+    {
+        lws_service(context, 0);
+        if (web_socket && lws_get_socket_fd(web_socket) >= 0 && outgoing_queue->length>0) lws_callback_on_writable(web_socket);
+    }
+}
+
 ////TODO: Implement SP, currently has no use in MP
 void AP_Start() {
     init = true;
@@ -833,39 +866,8 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     map_players = g_array_new(true, true, sizeof(struct AP_NetworkPlayer*));
     g_array_append_val(map_players, archipelago);
     AP_Init_Generic();
-    char ip_buf[sizeof("wss://") + sizeof(ap_ip)];
 
-    while (true)
-    {
-        /* Connect if we are not connected to the server. */
-        if (!web_socket)
-        {
-            struct lws_client_connect_info ccinfo;
-            memset(&ccinfo, 0, sizeof(ccinfo));
-            ccinfo.context = context;
-            if (isSSL) { sprintf(ip_buf, "%s%s", "wss://", ap_ip); ccinfo.address = ip_buf; ccinfo.ssl_connection = true; }
-            else { sprintf(ip_buf, "%s%s", "ws://", ap_ip); ccinfo.address = ip_buf; ccinfo.ssl_connection = false; }
-            ccinfo.address = ap_ip;
-            ccinfo.port = ap_port;
-            ccinfo.path = "/";
-            //ccinfo.host = lws_canonical_hostname(context);
-            ccinfo.host = ccinfo.address;
-            ccinfo.origin = "origin";
-            ccinfo.protocol = protocols[PROTOCOL_AP].name;
-            web_socket = lws_client_connect_via_info(&ccinfo);
-            while (!connected && web_socket)
-            {
-                lws_service(context, 0);
-                Sleep(100);
-            }
-        }
-        if (connected && web_socket)
-        {
-            lws_service(context, 0);
-            if (web_socket && lws_get_socket_fd(web_socket) >= 0) lws_callback_on_writable(web_socket);
-        }
-        Sleep(10);
-    }
+    
 }
 
 void AP_Init_Generic() {
