@@ -861,7 +861,7 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
         if (connected && web_socket)
         {
             lws_service(context, 0);
-            if (web_socket) lws_callback_on_writable(web_socket);
+            if (web_socket && lws_get_socket_fd(web_socket) >= 0) lws_callback_on_writable(web_socket);
         }
         Sleep(250);
     }
