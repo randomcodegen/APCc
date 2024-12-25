@@ -539,10 +539,14 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
         break;
     case LWS_CALLBACK_CLOSED:
         auth = false;
+        connected = false;
+        web_socket = NULL;
         break;
 
     case LWS_CALLBACK_CLIENT_CLOSED:
         auth = false;
+        connected = false;
+        web_socket = NULL;
         break;
 
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
@@ -823,7 +827,7 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     // TODO: Does this work? Try WSS to see if it fails
     //lws_info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
 
-    struct lws_context* context = lws_create_context(&lws_info);
+    context = lws_create_context(&lws_info);
 
     struct AP_NetworkPlayer* archipelago = AP_NetworkPlayer_new(-1, 0, "Archipelago", "Archipelago", "__Server");
     map_players = g_array_new(true, true, sizeof(struct AP_NetworkPlayer*));
@@ -849,11 +853,15 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
             ccinfo.origin = "origin";
             ccinfo.protocol = protocols[PROTOCOL_AP].name;
             web_socket = lws_client_connect_via_info(&ccinfo);
+            while (!connected && web_socket)
+            {
+                lws_service(context, 0);
+            }
         }
-        lws_service(context, 0);
-        if (web_socket)
+        if (connected && web_socket)
         {
-            lws_callback_on_writable(web_socket);
+            lws_service(context, 0);
+            if (web_socket) lws_callback_on_writable(web_socket);
         }
         Sleep(250);
     }
