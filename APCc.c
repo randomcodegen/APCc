@@ -636,7 +636,7 @@ void AP_SendLocationScouts(GArray* locations, int create_as_hint) {
         }
         
         json_object_set_new(req_t, "locations", req_locations_array);
-        json_object_set_new(req_t, "create_as_hint", json_boolean(create_as_hint));
+        json_object_set_new(req_t, "create_as_hint", json_integer(create_as_hint));
         json_array_append_new(req_array, req_t);
         g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
     }
@@ -1205,6 +1205,7 @@ bool parse_response(char* msg)
                 json_t* sync_obj = json_object();
                 json_object_set_new(sync_obj, "cmd", json_string("Sync"));
                 json_array_append_new(request, sync_obj);
+                data_synced = true;
             }
             g_queue_push_tail(outgoing_queue, json_deep_copy(request));
             return true;
@@ -1216,6 +1217,7 @@ bool parse_response(char* msg)
             json_object_set_new(sync_obj, "cmd", json_string("Sync"));
             json_array_append_new(request, sync_obj);
             g_queue_push_tail(outgoing_queue, json_deep_copy(request));
+            data_synced = true;
             return true;
         }
         else if (cmd && !strcmp(cmd, "Retrieved"))
@@ -1947,7 +1949,6 @@ void parseDataPkgCache() {
             GString* gs_key = g_string_new(k);
             g_hash_table_insert(map_game_to_data, gs_key, game_data);
         }
-        data_synced = true;
     }
 }
 
