@@ -30,6 +30,19 @@ const char* jtype_to_string(json_t* j)
     }
 }
 
+gboolean g_array_append_unique_gstring(GArray* array, GString* str) {
+    for (guint i = 0; i < array->len; i++) {
+        GString* existing = g_array_index(array, GString*, i);
+        if (g_string_equal(existing, str)) {
+            return FALSE;
+        }
+    }
+
+    GString* str_copy = g_string_new(str->str);
+    g_array_append_val(array, str_copy);
+    return TRUE;
+}
+
 // Struct funcs
 
 struct AP_NetworkVersion* AP_NetworkVersion_new(int major, int minor, int build) {
@@ -1602,28 +1615,32 @@ void AP_SetDeathLinkRecvCallback(void (*f_deathrecv)()) {
 void AP_RegisterSlotDataIntCallback(char* key, void (*f_slotdata)(uint64_t)) {
     GString* gs_key = g_string_new(key);
     g_hash_table_insert(map_slotdata_callback_int, gs_key, f_slotdata);
-    g_array_append_val(slotdata_strings, gs_key);
+    //g_array_append_val(slotdata_strings, gs_key);
+    g_array_append_unique_gstring(slotdata_strings, gs_key);
 }
 
 // Returns the slot_data element as a string
 void AP_RegisterSlotDataRawCallback(char* key, void (*f_slotdata)(char*)) {
     GString* gs_key = g_string_new(key);
     g_hash_table_insert(map_slotdata_callback_raw, gs_key , f_slotdata);
-    g_array_append_val(slotdata_strings, gs_key);
+    // g_array_append_val(slotdata_strings, gs_key);
+    g_array_append_unique_gstring(slotdata_strings, gs_key);
 }
 
 // Returns the slot_data element as a GArray filled with integers
 void AP_RegisterSlotDataIntArrayCallback(char* key, void (*f_slotdata)(GArray*)) {
     GString* gs_key = g_string_new(key);
     g_hash_table_insert(map_slotdata_callback_intarray, gs_key, f_slotdata);
-    g_array_append_val(slotdata_strings, gs_key);
+    //g_array_append_val(slotdata_strings, gs_key);
+    g_array_append_unique_gstring(slotdata_strings, gs_key);
 }
 
 // Returns the slot_data element as a json object
 void AP_RegisterSlotDataJSONObjectCallback(char* key, void (*f_slotdata)(json_t*)) {
     GString* gs_key = g_string_new(key);
     g_hash_table_insert(map_slotdata_callback_jsonobj, gs_key, f_slotdata);
-    g_array_append_val(slotdata_strings, gs_key);
+    //g_array_append_val(slotdata_strings, gs_key);
+    g_array_append_unique_gstring(slotdata_strings, gs_key);
 }
 
 void AP_SetDeathLinkSupported(bool supdeathlink) {
