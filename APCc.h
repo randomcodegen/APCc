@@ -1,3 +1,6 @@
+#define MAX_PAYLOAD_SIZE 32768
+#define WRITE_BUFFER_SIZE 32768
+
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
@@ -122,8 +125,7 @@ void AP_SetDeathLinkRecvCallback(void (*f_deathrecv)());
 // Parameter Function receives Slotdata of respective type
 void AP_RegisterSlotDataIntCallback(char*, void (*f_slotdata)(uint64_t));
 void AP_RegisterSlotDataIntArrayCallback(char*, void (*f_slotdata)(GArray*));
-void AP_RegisterSlotDataRawCallback(char*, void (*f_slotdata)(char*));
-void AP_RegisterSlotDataJSONObjectCallback(char*, void (*f_slotdata)(json_t*));
+void AP_RegisterSlotDataRawCallback(char*, void (*f_slotdata)(json_t*));
 
 // Send LocationScouts packet
 //void AP_SendLocationScouts(std::vector<int64_t> const& locations, int create_as_hint);

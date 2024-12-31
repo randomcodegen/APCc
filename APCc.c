@@ -459,7 +459,6 @@ GHashTable* map_server_data = NULL;
 GHashTable* map_slotdata_callback_int = NULL; //std::map<std::string, void (*)(int)> map_slotdata_callback_int;
 GHashTable* map_slotdata_callback_raw = NULL; //std::map<std::string, void (*)(std::string)> map_slotdata_callback_raw;
 GHashTable* map_slotdata_callback_intarray = NULL; //std::map<std::string, void (*)(std::map<int, int>)> map_slotdata_callback_intarray;
-GHashTable* map_slotdata_callback_jsonobj = NULL;
 GArray* slotdata_strings = NULL; //std::vector<std::string> slotdata_strings;
 GHashTableIter it;
 
@@ -474,7 +473,7 @@ json_t* sp_ap_root;
 
 // PRIV Func Declarations Start
 void AP_Init_Generic();
-bool parse_response(char* msg);
+bool parse_response(json_t* root);
 //void APSend(char* req);
 char* getItemName(const char* gamename, uint64_t id);
 char* getLocationName(const char* gamename, uint64_t id);
@@ -496,59 +495,151 @@ enum protocols
     PROTOCOL_COUNT
 };
 
-#define EXAMPLE_TX_BUFFER_BYTES 10
+struct per_session_data {
+    GString* message_buffer;
+    bool is_processing;
+};
 
+#define EXAMPLE_TX_BUFFER_BYTES 10
+int recv_count = 0;
 static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len)
 {
+    struct per_session_data* psd = (struct per_session_data*)user;
+    int result = 0;
+
     switch (reason)
     {
     case LWS_CALLBACK_CLIENT_ESTABLISHED:
+        if (!psd) {
+            lwsl_err("No user session data\n");
+            return -1;
+        }
+        psd->message_buffer = NULL;
+        psd->is_processing = false;
         connected = true;
         break;
 
     case LWS_CALLBACK_CLIENT_RECEIVE:
-        if (in && len > 0)
+        recv_count++;
+        if (!in || len == 0) {
+            lwsl_warn("Empty receive buffer\n");
+            return 0;
+        }
+        if (!psd) {
+            lwsl_err("No user session data\n");
+            return -1;
+        }
+
+        size_t remaining = lws_remaining_packet_payload(wsi);
+
+        if (lws_is_first_fragment(wsi) && !psd->is_processing) {
+
+            if (len + remaining > MAX_PAYLOAD_SIZE) {
+                //lwsl_warn("Large message incoming: %zu bytes\n", len + remaining);
+            }
+            psd->message_buffer = g_string_new(NULL);
+            psd->is_processing = true;
+        }
+
+        if (psd->message_buffer) {
+            g_string_append_len(psd->message_buffer, (const gchar*)in, len);
+        }
+
+        // Process when complete
+        if (lws_is_final_fragment(wsi))
         {
-            //Handle incoming packets
-            size_t remaining = lws_remaining_packet_payload(wsi);
+            if (psd->message_buffer) {
+                char* current_pos = psd->message_buffer->str;
+                char* end_pos = psd->message_buffer->str + psd->message_buffer->len;
 
-            if (lws_is_first_fragment(wsi))
-            {
-                if (message_buffer) {
-                    g_string_free(message_buffer, true);
+                while (current_pos < end_pos) {
+                    json_t* json = json_loads(current_pos, JSON_DISABLE_EOF_CHECK, &jerror);
+
+                    if (!json) {
+                        if (jerror.text != NULL) {
+                            lwsl_warn("JSON parse error: %s at position %zd. Trying to recover.\n", jerror.text, jerror.position);
+                            if (jerror.position > 0 && jerror.position < psd->message_buffer->len) {
+                                current_pos += jerror.position;
+                                while (current_pos < end_pos && isspace(*current_pos)) {
+                                    current_pos++;
+                                }
+                                if (current_pos < end_pos && *current_pos != '{' && *current_pos != '[') { // Try finding the next '{' or '['
+                                    while (current_pos < end_pos && *current_pos != '{' && *current_pos != '[') {
+                                        current_pos++;
+                                    }
+                                }
+                                if (current_pos >= end_pos) {
+                                    break;
+                                }
+                                continue;
+                            }
+                            else {
+                                lwsl_err("Unrecoverable JSON parse error: %s.\n", jerror.text);
+                                break;
+                            }
+                        }
+                        else {
+                            lwsl_err("Unknown JSON parse error.\n");
+                            break;
+                        }
+                    }
+                    else {
+                        parse_response(json);
+                        json_decref(json);
+                        current_pos += jerror.position; // Advance using the error.position
+                        while (current_pos < end_pos && isspace(*current_pos)) {
+                            current_pos++; // Skip whitespace
+                        }
+                    }
                 }
-                message_buffer = g_string_new_len(NULL, len+remaining);
 
-                //Append First fragment after reinitializing buffer
-                g_string_append_len(message_buffer, (gchar*)in, len);
-                if (remaining == 0) parse_response((char*)message_buffer->str);
-            }
-            else if (!lws_is_first_fragment(wsi) && !lws_is_final_fragment(wsi))
-            {
-                //if middle fragment, append to buffer
-                g_string_append_len(message_buffer, (gchar*)in, len);
-            }
-            else if (lws_is_final_fragment(wsi))
-            {
-                g_string_append_len(message_buffer, (gchar*)in, len);
-                parse_response((char*)message_buffer->str);
+                g_string_free(psd->message_buffer, TRUE);
+                psd->message_buffer = NULL;
+                psd->is_processing = false;
             }
         }
         break;
 
     case LWS_CALLBACK_CLIENT_WRITEABLE:
-        while (outgoing_queue->length > 0) 
-        {
-            json_t* json_out = g_queue_pop_head(outgoing_queue);
-            char* msg_out = json_dumps(json_out, 0);
-            if (msg_out) lws_write(wsi, (unsigned char*)msg_out, strlen(msg_out), LWS_WRITE_TEXT);
+        unsigned char buf[LWS_PRE + WRITE_BUFFER_SIZE];
+        unsigned char* write_buf = &buf[LWS_PRE];
+
+        while (!g_queue_is_empty(outgoing_queue)) {
+            json_t* json_out = g_queue_peek_head(outgoing_queue);
+            if (!json_out) {
+                continue;
+            }
+
+            char* msg_out = json_dumps(json_out, JSON_COMPACT);
+            if (!msg_out) {
+                lwsl_err("JSON serialization failed\n");
+                continue;
+            }
+
+            size_t msg_len = strlen(msg_out);
+            if (msg_len > WRITE_BUFFER_SIZE) {
+                lwsl_err("Message too large for buffer: %zu bytes\n", msg_len);
+                free(msg_out);
+                continue;
+            }
+
+            memcpy(write_buf, msg_out, msg_len);
+            int written = lws_write(wsi, write_buf, msg_len, LWS_WRITE_TEXT);
+
+            free(msg_out);
+            g_queue_pop_head(outgoing_queue);
+            json_decref(json_out);
+
+            if (written < msg_len) {
+                lwsl_err("Write failed: %d/%zu\n", written, msg_len);
+                return -1;
+            }
+
+            // Check if we need more write events
+            if (!g_queue_is_empty(outgoing_queue)) {
+                lws_callback_on_writable(wsi);
+            }
         }
-        /*TODO: Look into buffer for better send optimization. 
-        Doc Example:
-        unsigned char buf[LWS_SEND_BUFFER_PRE_PADDING + EXAMPLE_TX_BUFFER_BYTES + LWS_SEND_BUFFER_POST_PADDING];
-        unsigned char* p = &buf[LWS_SEND_BUFFER_PRE_PADDING];
-         m = message
-        lws_write(wsi, p, m, LWS_WRITE_TEXT);*/
         break;
     case LWS_CALLBACK_CLOSED:
         auth = false;
@@ -557,12 +648,20 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
         break;
 
     case LWS_CALLBACK_CLIENT_CLOSED:
+        if (psd && psd->message_buffer) {
+            g_string_free(psd->message_buffer, TRUE);
+            psd->message_buffer = NULL;
+        }
         auth = false;
         connected = false;
         web_socket = NULL;
         break;
 
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
+        if (psd && psd->message_buffer) {
+            g_string_free(psd->message_buffer, TRUE);
+            psd->message_buffer = NULL;
+        }
         auth = false;
         connected = false;
         web_socket = NULL;
@@ -581,7 +680,7 @@ static struct lws_protocols protocols[] =
     {
         .name = "archipelago-protocol",     /* Protocol name*/
         .callback = lws_callbacks,      /* Protocol callback */
-        .per_session_data_size = 0,     /* Protocol callback 'userdata' size */
+        .per_session_data_size = sizeof(struct per_session_data),     /* Protocol callback 'userdata' size */
         .rx_buffer_size = 0,            /* Receive buffer size (0 = no restriction) */
         .id = 0,                        /* Protocol Id (version) (optional) */
         .user = NULL,                   /* 'User data' ptr, to access in 'protocol callback */
@@ -598,6 +697,15 @@ void AP_SetClientVersion(struct AP_NetworkVersion* version) {
     client_version->build = version->build;
 }
 
+void AP_SendWeb()
+{
+    lws_callback_on_writable(web_socket);
+    while (outgoing_queue->length > 0)
+    {
+        AP_WebService();
+    }
+}
+
 //TODO: Implement SP
 void AP_SendItem(uint64_t idx) {
     if (multiworld) {
@@ -609,6 +717,7 @@ void AP_SendItem(uint64_t idx) {
         json_object_set_new(req_t, "locations", req_locations_array);
         json_array_append_new(req_array, req_t);
         g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
+        AP_SendWeb();
     }
     else {
         /*
@@ -652,6 +761,7 @@ void AP_SendLocationScouts(GArray* locations, int create_as_hint) {
         json_object_set_new(req_t, "create_as_hint", json_integer(create_as_hint));
         json_array_append_new(req_array, req_t);
         g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
+        AP_SendWeb();
     }
     else {
         /*
@@ -677,9 +787,10 @@ void AP_SendLocationScout(uint64_t location, int create_as_hint) {
         json_object_set_new(req_t, "cmd", json_string("LocationScouts"));
         json_array_append_new(req_locations_array, json_integer(location));
         json_object_set_new(req_t, "locations", req_locations_array);
-        json_object_set_new(req_t, "create_as_hint", json_boolean(create_as_hint));
+        json_object_set_new(req_t, "create_as_hint", json_integer(create_as_hint));
         json_array_append_new(req_array, req_t);
         g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
+        AP_SendWeb();
     }
     else {
         /*
@@ -705,6 +816,7 @@ void AP_StoryComplete() {
     json_object_set_new(req_t, "status", json_integer(30));
     json_array_append_new(req_array, req_t);
     g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
+    AP_SendWeb();
 }
 
 void AP_DeathLinkSend() {
@@ -731,6 +843,7 @@ void AP_DeathLinkSend() {
     json_object_set_new(req_t, "tags", req_tags_array);
     json_array_append_new(req_array, req_t);
     g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
+    AP_SendWeb();
 }
 
 //TODO: Implement SP
@@ -769,16 +882,11 @@ void AP_WebService() {
         ccinfo.origin = "origin";
         ccinfo.protocol = protocols[PROTOCOL_AP].name;
         web_socket = lws_client_connect_via_info(&ccinfo);
-        while (!connected && web_socket)
-        {
-            lws_service(context, 0);
-            Sleep(100);
-        }
+        lws_service(context, 0);
     }
     else if (web_socket)
     {
         lws_service(context, 0);
-        if (web_socket && lws_get_socket_fd(web_socket) >= 0 && outgoing_queue->length>0) lws_callback_on_writable(web_socket);
     }
 }
 
@@ -852,7 +960,6 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     map_slotdata_callback_int = g_hash_table_new(g_string_hash, g_string_equal);
     map_slotdata_callback_raw = g_hash_table_new(g_string_hash, g_string_equal);
     map_slotdata_callback_intarray = g_hash_table_new(g_string_hash, g_string_equal);
-    map_slotdata_callback_jsonobj = g_hash_table_new(g_string_hash, g_string_equal);
     
     ap_ip = ip;
     ap_port = port;
@@ -892,12 +999,9 @@ void AP_Init_Generic() {
     return;
 }
 
-bool parse_response(char* msg)
+bool parse_response(json_t* root)
 {
     request = json_array();
-    uint64_t msglen = strlen(msg);
-    struct json_t* root = json_loads(msg, 0, &jerror);
-    if (!root) { printf("Error parsing incoming request: %s\n", jerror.text); return 0; }
     // Received a valid json
     for (int i = 0; i < json_array_size(root); i++)
     {
@@ -908,7 +1012,7 @@ bool parse_response(char* msg)
         if (temp_obj) { cmd = _strdup(json_string_value(temp_obj)); } else { printf("Error retreiving array element %i of incoming request.", i); return 0; }
         if (cmd && !strcmp(cmd, "RoomInfo"))
         {
-            if (temp_obj = json_object_get(obj, "password")) { lib_room_info.password_required = json_boolean_value(obj); }
+            if (temp_obj = json_object_get(obj, "password")) { lib_room_info.password_required = json_integer_value(obj); }
             if (temp_obj = json_object_get(obj, "games")) 
             {
                 GArray* serv_games = g_array_new(true, true, sizeof(char*));
@@ -1001,6 +1105,7 @@ bool parse_response(char* msg)
                 json_object_set_new(req_t, "items_handling", json_integer(7));
                 json_array_append_new(request, req_t);
                 g_queue_push_tail(outgoing_queue, json_deep_copy(request));
+                AP_SendWeb();
                 return true;
             }
             
@@ -1087,9 +1192,8 @@ bool parse_response(char* msg)
                         gpointer callback_func_ptr = NULL;
                         if ((callback_func_ptr = (void*)g_hash_table_lookup(map_slotdata_callback_raw, callback_key)) != NULL)
                         {
-                            // Raw callback, no type checking required
-                            char* read_val = json_dumps(slot_data_obj, JSON_ENCODE_ANY);
-                            ((void(*)(char*))callback_func_ptr)(read_val);
+                            // JSON Object callback, no type checking required
+                            ((void(*)(json_t*))callback_func_ptr)(slot_data_obj);
                         }
                         
                         if ((callback_func_ptr = (void*)g_hash_table_lookup(map_slotdata_callback_int, callback_key)) != NULL)
@@ -1126,11 +1230,6 @@ bool parse_response(char* msg)
                                 ((void(*)(GArray*))callback_func_ptr)(j_array);
                             }
                             else { printf("AP_RegisterSlotDataIntArrayCallback key element %s has wrong type: %s", callback_key->str, jtype_to_string(slot_data_obj)); }
-                        }
-                        if ((callback_func_ptr = (void*)g_hash_table_lookup(map_slotdata_callback_jsonobj, callback_key)) != NULL)
-                        {
-                            // JSON Object callback, no type checking required
-                            ((void(*)(json_t*))callback_func_ptr)(slot_data_obj);
                         }
                     }
                 }
@@ -1221,6 +1320,7 @@ bool parse_response(char* msg)
                 data_synced = true;
             }
             g_queue_push_tail(outgoing_queue, json_deep_copy(request));
+            AP_SendWeb();
             return true;
         }
         else if (cmd && !strcmp(cmd, "DataPackage")) 
@@ -1230,6 +1330,7 @@ bool parse_response(char* msg)
             json_object_set_new(sync_obj, "cmd", json_string("Sync"));
             json_array_append_new(request, sync_obj);
             g_queue_push_tail(outgoing_queue, json_deep_copy(request));
+            AP_SendWeb();
             data_synced = true;
             return true;
         }
@@ -1257,7 +1358,7 @@ bool parse_response(char* msg)
                             *((double*)target->value) = json_real_value(v);
                             break;
                         case Raw:
-                            *((char*)target->value) = *_strdup(json_string_value(v));
+                            (json_t*)target->value = json_deep_copy(v);
                             break;
                         }
                         target->status = Done;
@@ -1346,7 +1447,7 @@ bool parse_response(char* msg)
                     struct AP_NetworkPlayer* recv_player = getPlayer(0, (int)json_integer_value(rec_obj));
                     char* item_name = getItemName(ap_game, item_id);
                     char* loc_name = getLocationName(ap_game, loc_id);
-                    bool checked = json_boolean_value(found_obj);
+                    bool checked = json_integer_value(found_obj);
                     GArray* messageparts_array = g_array_new(true, true, sizeof(struct AP_MessagePart*));
                     struct AP_MessagePart* msg_p = AP_MessagePart_new("Item ", AP_NormalText);
                     g_array_append_val(messageparts_array, msg_p);
@@ -1620,7 +1721,7 @@ void AP_RegisterSlotDataIntCallback(char* key, void (*f_slotdata)(uint64_t)) {
 }
 
 // Returns the slot_data element as a string
-void AP_RegisterSlotDataRawCallback(char* key, void (*f_slotdata)(char*)) {
+void AP_RegisterSlotDataRawCallback(char* key, void (*f_slotdata)(json_t*)) {
     GString* gs_key = g_string_new(key);
     g_hash_table_insert(map_slotdata_callback_raw, gs_key , f_slotdata);
     // g_array_append_val(slotdata_strings, gs_key);
@@ -1631,14 +1732,6 @@ void AP_RegisterSlotDataRawCallback(char* key, void (*f_slotdata)(char*)) {
 void AP_RegisterSlotDataIntArrayCallback(char* key, void (*f_slotdata)(GArray*)) {
     GString* gs_key = g_string_new(key);
     g_hash_table_insert(map_slotdata_callback_intarray, gs_key, f_slotdata);
-    //g_array_append_val(slotdata_strings, gs_key);
-    g_array_append_unique_gstring(slotdata_strings, gs_key);
-}
-
-// Returns the slot_data element as a json object
-void AP_RegisterSlotDataJSONObjectCallback(char* key, void (*f_slotdata)(json_t*)) {
-    GString* gs_key = g_string_new(key);
-    g_hash_table_insert(map_slotdata_callback_jsonobj, gs_key, f_slotdata);
     //g_array_append_val(slotdata_strings, gs_key);
     g_array_append_unique_gstring(slotdata_strings, gs_key);
 }
@@ -1771,13 +1864,14 @@ void AP_SetServerData(struct AP_SetServerDataRequest* request) {
         json_object_set_new(req_t, "default", json_string((char*)request->default_value));
         break;
     }
-    json_object_set_new(req_t, "want_reply", json_boolean(request->want_reply));
+    json_object_set_new(req_t, "want_reply", json_integer(request->want_reply));
     GString* gs_key = g_string_new(request->key);
     g_hash_table_insert(map_serverdata_typemanage, gs_key, &request->type);
     if (multiworld)
     {
         json_array_append(req_array, req_t);
         g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
+        AP_SendWeb();
     }
     else if (sp_testing)
     {
@@ -1810,6 +1904,7 @@ void AP_SetNotify_Keylist(GHashTable* keylist) {
     }
     json_array_append_new(req_array, req_t);
     g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
+    AP_SendWeb();
 }
 
 //TODO: Test SetNotify
@@ -1837,6 +1932,7 @@ void AP_GetServerData(struct AP_GetServerDataRequest* request) {
         json_object_set_new(req_t, "keys", req_key_array);
         json_array_append_new(req_array, req_t);
         g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
+        AP_SendWeb();
     }
     else if (sp_testing)
     {
@@ -1857,8 +1953,7 @@ void AP_GetServerData(struct AP_GetServerDataRequest* request) {
         }
         json_object_set_new(fake_req_t, "keys", fake_req_key_array);
         json_array_append_new(fake_req_array, fake_req_t);
-        char* fake_msg = json_dumps(fake_req_array, 0);
-        parse_response(fake_msg);
+        parse_response(fake_req_array);
     }
 }
 
@@ -2053,6 +2148,5 @@ void localSetServerData(json_t* req)
     json_object_set_new(fake_req_t, "value", tmp_val);
     json_object_set_new(fake_req_t, "original_value", old);
     json_array_append_new(fake_req_array, fake_req_t);
-    char* fake_msg = json_dumps(fake_req_array, 0);
-    parse_response(fake_msg);
+    parse_response(fake_req_array);
 }
