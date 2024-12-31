@@ -601,18 +601,24 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
         break;
 
     case LWS_CALLBACK_CLIENT_WRITEABLE:
-        unsigned char buf[LWS_PRE + WRITE_BUFFER_SIZE];
+        unsigned char* buf = malloc(LWS_PRE + WRITE_BUFFER_SIZE);
+        if (!buf) {
+            lwsl_err("Buffer allocation failed\n");
+            return -1;
+        }
         unsigned char* write_buf = &buf[LWS_PRE];
 
         while (!g_queue_is_empty(outgoing_queue)) {
             json_t* json_out = g_queue_peek_head(outgoing_queue);
             if (!json_out) {
+                free(buf);
                 continue;
             }
 
             char* msg_out = json_dumps(json_out, JSON_COMPACT);
             if (!msg_out) {
                 lwsl_err("JSON serialization failed\n");
+                free(buf);
                 continue;
             }
 
@@ -620,6 +626,7 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             if (msg_len > WRITE_BUFFER_SIZE) {
                 lwsl_err("Message too large for buffer: %zu bytes\n", msg_len);
                 free(msg_out);
+                free(buf);
                 continue;
             }
 
@@ -632,6 +639,7 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
 
             if (written < msg_len) {
                 lwsl_err("Write failed: %d/%zu\n", written, msg_len);
+                free(buf);
                 return -1;
             }
 
@@ -640,6 +648,7 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
                 lws_callback_on_writable(wsi);
             }
         }
+        free(buf);
         break;
     case LWS_CALLBACK_CLOSED:
         auth = false;
