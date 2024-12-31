@@ -708,10 +708,7 @@ void AP_SetClientVersion(struct AP_NetworkVersion* version) {
 void AP_SendWeb()
 {
     lws_callback_on_writable(web_socket);
-    while (outgoing_queue->length > 0)
-    {
-        AP_WebService();
-    }
+    AP_WebService();
 }
 
 //TODO: Implement SP
