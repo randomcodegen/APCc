@@ -625,15 +625,14 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             size_t msg_len = strlen(msg_out);
             if (msg_len > WRITE_BUFFER_SIZE) {
                 lwsl_err("Message too large for buffer: %zu bytes\n", msg_len);
-                free(msg_out);
                 free(buf);
                 continue;
             }
 
             memcpy(write_buf, msg_out, msg_len);
             int written = lws_write(wsi, write_buf, msg_len, LWS_WRITE_TEXT);
-
-            free(msg_out);
+            //TODO: [ap] this causes a heap corruption when paired with Quake 1, investigate
+            //free(msg_out);
             g_queue_pop_head(outgoing_queue);
             json_decref(json_out);
 
