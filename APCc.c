@@ -5,22 +5,6 @@ bool sp_testing = false;
 
 // Helper funcs
 
-// Required to integrate into Quake 1 memory alloc
-char* copy_json_string(json_t* json_data) {
-    char* json_string = json_dumps(json_data, JSON_COMPACT);
-    if (!json_string) return NULL;
-
-    size_t len = strlen(json_string) + 1;
-    char* copied_string = (char*)malloc(len);
-    if (!copied_string) {
-        free(json_string);
-        return NULL;
-    }
-    strcpy(copied_string, json_string);
-    free(json_string);
-    return copied_string;
-}
-
 const char* jtype_to_string(json_t* j) 
 {
     json_type jt = json_typeof(j);
@@ -631,8 +615,8 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
                 free(buf);
                 continue;
             }
-            char* msg_out = copy_json_string(json_out);
-            //char* msg_out = json_dumps(json_out, JSON_COMPACT);
+
+            char* msg_out = json_dumps(json_out, JSON_COMPACT);
             if (!msg_out) {
                 lwsl_err("JSON serialization failed\n");
                 free(msg_out);
