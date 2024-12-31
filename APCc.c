@@ -532,12 +532,12 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
 
         size_t remaining = lws_remaining_packet_payload(wsi);
 
-        if (lws_is_first_fragment(wsi) && !psd->is_processing) {
+        if (lws_is_first_fragment(wsi)) {
 
             if (len + remaining > MAX_PAYLOAD_SIZE) {
                 //lwsl_warn("Large message incoming: %zu bytes\n", len + remaining);
             }
-            psd->message_buffer = g_string_new(NULL);
+            psd->message_buffer = g_string_new_len(NULL, len + remaining);
             psd->is_processing = true;
         }
 
@@ -563,8 +563,8 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
                                 while (current_pos < end_pos && isspace(*current_pos)) {
                                     current_pos++;
                                 }
-                                if (current_pos < end_pos && *current_pos != '{' && *current_pos != '[') { // Try finding the next '{' or '['
-                                    while (current_pos < end_pos && *current_pos != '{' && *current_pos != '[') {
+                                if (current_pos < end_pos && *current_pos != '[') { // Try finding the next  '['
+                                    while (current_pos < end_pos && *current_pos != '[') {
                                         current_pos++;
                                     }
                                 }
@@ -584,6 +584,7 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
                         }
                     }
                     else {
+                        printf("in: %s \n\n\n", current_pos);
                         parse_response(json);
                         json_decref(json);
                         current_pos += jerror.position; // Advance using the error.position
@@ -618,6 +619,7 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             char* msg_out = json_dumps(json_out, JSON_COMPACT);
             if (!msg_out) {
                 lwsl_err("JSON serialization failed\n");
+                free(msg_out);
                 free(buf);
                 continue;
             }
@@ -625,17 +627,17 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             size_t msg_len = strlen(msg_out);
             if (msg_len > WRITE_BUFFER_SIZE) {
                 lwsl_err("Message too large for buffer: %zu bytes\n", msg_len);
+                free(msg_out);
                 free(buf);
                 continue;
             }
 
             memcpy(write_buf, msg_out, msg_len);
             int written = lws_write(wsi, write_buf, msg_len, LWS_WRITE_TEXT);
-            //TODO: [ap] this causes a heap corruption when paired with Quake 1, investigate
-            //free(msg_out);
-            g_queue_pop_head(outgoing_queue);
+            printf("out: %s \n\n\n",msg_out);
+            free(msg_out);
             json_decref(json_out);
-
+            g_queue_pop_head(outgoing_queue);
             if (written < msg_len) {
                 lwsl_err("Write failed: %d/%zu\n", written, msg_len);
                 free(buf);
@@ -643,10 +645,9 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             }
             // TODO: Is this necessary?
             // Check if we need more write events
-            /*
             if (!g_queue_is_empty(outgoing_queue)) {
                 lws_callback_on_writable(wsi);
-            }*/
+            }
         }
         free(buf);
         break;
@@ -708,10 +709,7 @@ void AP_SetClientVersion(struct AP_NetworkVersion* version) {
 
 void AP_SendWeb()
 {
-    if (!g_queue_is_empty(outgoing_queue)) {
     lws_callback_on_writable(web_socket);
-    AP_WebService();
-    }
 }
 
 //TODO: Implement SP
@@ -891,10 +889,12 @@ void AP_WebService() {
         ccinfo.protocol = protocols[PROTOCOL_AP].name;
         web_socket = lws_client_connect_via_info(&ccinfo);
         lws_service(context, 0);
+        Sleep(10);
     }
     else if (web_socket)
     {
         lws_service(context, 0);
+        Sleep(10);
     }
 }
 
@@ -1121,7 +1121,7 @@ bool parse_response(json_t* root)
         else if (cmd && !strcmp(cmd, "Connected"))
         {
             // Waiting for call to AP_Start()
-            while (!ap_ready) {   Sleep(250); }
+            while (!ap_ready) {   Sleep(100); }
             if (temp_obj = json_object_get(obj, "slot")) { ap_player_id = (int)json_integer_value(temp_obj); }
             // Avoid inconsistency if we disconnected before
             (*resetItemValues)();
