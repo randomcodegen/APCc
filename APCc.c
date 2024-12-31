@@ -641,11 +641,12 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
                 free(buf);
                 return -1;
             }
-
+            // TODO: Is this necessary?
             // Check if we need more write events
+            /*
             if (!g_queue_is_empty(outgoing_queue)) {
                 lws_callback_on_writable(wsi);
-            }
+            }*/
         }
         free(buf);
         break;
