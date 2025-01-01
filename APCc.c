@@ -1353,9 +1353,9 @@ bool parse_response(json_t* root)
                 {
                     //Check if key is present in map_server_data
                     GString* gs_key = g_string_new(k);
-                    if (g_hash_table_lookup(map_server_data, gs_key)) 
+                    struct AP_GetServerDataRequest* target = g_hash_table_lookup(map_server_data, gs_key);
+                    if (target) 
                     {
-                        struct AP_GetServerDataRequest* target = g_hash_table_lookup(map_server_data, gs_key);
                         if (json_is_null(v)) { target->value = NULL; target->status = Done; g_hash_table_remove(map_server_data, gs_key); break; }
                         switch (target->type)
                         {
@@ -1985,15 +1985,11 @@ char* getItemName(const char* gamename, uint64_t id) {
     }
     
     GString* gs_key = g_string_new(gamename);
-    if (g_hash_table_lookup(map_game_to_data, gs_key)) {
-        struct AP_GameData* gamedata = g_hash_table_lookup(map_game_to_data, gs_key);
-        if (g_hash_table_lookup(gamedata->item_data, &id))
-        {
-            return (char*)g_hash_table_lookup(gamedata->item_data, &id);
-        }
-        else
-        {
-            return "Unknown Item";
+    struct AP_GameData* gamedata = g_hash_table_lookup(map_game_to_data, gs_key);
+    if (gamedata) {        
+        if (g_hash_table_lookup(gamedata->item_data, &id)) {
+            char* item_name = g_hash_table_lookup(gamedata->item_data, &id);
+            return item_name ? item_name : "Unknown Item";
         }
     }
     else {
@@ -2002,6 +1998,7 @@ char* getItemName(const char* gamename, uint64_t id) {
         snprintf(message, buffer_size, "Gamename %s not found", gamename);
         return message;
     }
+    return "Unknown Item";
 }
 
 char* getLocationName(const char* gamename, uint64_t id) {
@@ -2011,15 +2008,11 @@ char* getLocationName(const char* gamename, uint64_t id) {
     }
     
     GString* gs_key = g_string_new(gamename);
-    if (g_hash_table_lookup(map_game_to_data, gs_key)) {
-        struct AP_GameData* gamedata = g_hash_table_lookup(map_game_to_data, gs_key);
-        if (g_hash_table_lookup(gamedata->location_data, &id))
-        {
-            return (char*)g_hash_table_lookup(gamedata->location_data, &id);
-        }
-        else
-        {
-            return "Unknown Location";
+    struct AP_GameData* gamedata = g_hash_table_lookup(map_game_to_data, gs_key);
+    if (gamedata) {
+        if (g_hash_table_lookup(gamedata->location_data, &id))        {
+            char* location_name = g_hash_table_lookup(gamedata->location_data, &id);
+            return location_name ? location_name : "Unknown Location";
         }
     }
     else {
@@ -2028,6 +2021,7 @@ char* getLocationName(const char* gamename, uint64_t id) {
         snprintf(message, buffer_size, "Gamename %s not found", gamename);
         return message;
     }
+    return "Unknown Item";
 }
 
 void parseDataPkgCache() {
