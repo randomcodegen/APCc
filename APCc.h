@@ -288,3 +288,5 @@ void AP_RegisterSetReplyCallback(void (*f_setreply)(struct AP_SetReply* reply));
 void AP_SetNotify_Keylist(GHashTable* keylist);
 // Single Key version of above for convenience
 void AP_SetNotify_Type(char* key, AP_DataType type);
+
+void start_lws_timer(int timeout_ms);

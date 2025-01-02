@@ -700,6 +700,40 @@ static struct lws_protocols protocols[] =
 };
 
 
+// Handle to the timer queue
+HANDLE timerQueue;
+
+// Define the timer callback function type
+typedef VOID(CALLBACK* TIMER_ROUTINE) (
+    PVOID lpParameter,
+    BOOLEAN TimerOrWaitFired
+    );
+
+// Function to be executed by the timer callback
+void CALLBACK TimerRoutine(PVOID lpParameter, BOOLEAN TimerOrWaitFired) {
+    lws_service(context, 0);
+}
+
+// Create and start the timer
+void start_lws_timer(int timeout_ms) {
+    // Create a timer queue
+    timerQueue = CreateTimerQueue();
+    if (timerQueue == NULL) {
+        fprintf(stderr, "CreateTimerQueue failed: %d\n", GetLastError());
+        return;
+    }
+
+    // Create a timer
+    HANDLE timer;
+    if (!CreateTimerQueueTimer(&timer, timerQueue, (TIMER_ROUTINE)TimerRoutine,
+        context, timeout_ms, timeout_ms, 0)) { // Trigger every timeout_ms milliseconds
+        fprintf(stderr, "CreateTimerQueueTimer failed: %d\n", GetLastError());
+        DeleteTimerQueue(timerQueue);
+        return;
+    }
+}
+
+
 void AP_SetClientVersion(struct AP_NetworkVersion* version) {
     if (!client_version) { client_version = AP_NetworkVersion_new(0, 2, 6); }
     client_version->major = version->major;
