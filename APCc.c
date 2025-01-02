@@ -714,8 +714,8 @@ void CALLBACK TimerRoutine(PVOID lpParameter, BOOLEAN TimerOrWaitFired) {
     lws_service(context, 0);
 }
 
-// Create and start the timer
-void start_lws_timer(int timeout_ms) {
+// Create and start the timer for the Websocket Callback Checks
+void AP_WebsocketTimer(int timeout_ms) {
     // Create a timer queue
     timerQueue = CreateTimerQueue();
     if (timerQueue == NULL) {
