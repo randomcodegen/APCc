@@ -889,12 +889,10 @@ void AP_WebService() {
         ccinfo.protocol = protocols[PROTOCOL_AP].name;
         web_socket = lws_client_connect_via_info(&ccinfo);
         lws_service(context, 0);
-        Sleep(10);
     }
     else if (web_socket)
     {
         lws_service(context, 0);
-        Sleep(10);
     }
 }
 
@@ -2028,6 +2026,7 @@ void parseDataPkgCache() {
     if (!datapkg_cache)
     {
         printf("parseDataPkgCache called without a valid datapkg_cache.\n");
+        return;
     }
     else
     {
