@@ -612,7 +612,6 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
         while (!g_queue_is_empty(outgoing_queue)) {
             json_t* json_out = g_queue_peek_head(outgoing_queue);
             if (!json_out) {
-                free(buf);
                 continue;
             }
 
@@ -620,7 +619,6 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             if (!msg_out) {
                 lwsl_err("JSON serialization failed\n");
                 free(msg_out);
-                free(buf);
                 continue;
             }
 
@@ -628,7 +626,6 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             if (msg_len > WRITE_BUFFER_SIZE) {
                 lwsl_err("Message too large for buffer: %zu bytes\n", msg_len);
                 free(msg_out);
-                free(buf);
                 continue;
             }
 
@@ -640,8 +637,7 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             g_queue_pop_head(outgoing_queue);
             if (written < msg_len) {
                 lwsl_err("Write failed: %d/%zu\n", written, msg_len);
-                free(buf);
-                return -1;
+                continue;
             }
             // TODO: Is this necessary?
             // Check if we need more write events
