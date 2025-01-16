@@ -739,7 +739,7 @@ void AP_SetClientVersion(struct AP_NetworkVersion* version) {
 
 void AP_SendWeb()
 {
-    lws_callback_on_writable(web_socket);
+    if (web_socket) lws_callback_on_writable(web_socket);
 }
 
 //TODO: Implement SP
