@@ -698,21 +698,29 @@ static struct lws_protocols protocols[] =
 
 // Handle to the timer queue
 HANDLE timerQueue;
+CRITICAL_SECTION timerMutex;
+bool lwsServiceActive = false;
 
-// Define the timer callback function type
 typedef VOID(CALLBACK* TIMER_ROUTINE) (
     PVOID lpParameter,
     BOOLEAN TimerOrWaitFired
     );
 
-// Function to be executed by the timer callback
 void CALLBACK TimerRoutine(PVOID lpParameter, BOOLEAN TimerOrWaitFired) {
-    lws_service(context, 0);
+    EnterCriticalSection(&timerMutex);
+
+    if (!lwsServiceActive) {
+        lwsServiceActive = true;
+        if (context) lws_service(context, 0);
+        lwsServiceActive = false;
+    }
+
+    LeaveCriticalSection(&timerMutex);
 }
 
 // Create and start the timer for the Websocket Callback Checks
 void AP_WebsocketTimer(int timeout_ms) {
-    // Create a timer queue
+    EnterCriticalSection(&timerMutex);
     timerQueue = CreateTimerQueue();
     if (timerQueue == NULL) {
         fprintf(stderr, "CreateTimerQueue failed: %d\n", GetLastError());
@@ -727,6 +735,7 @@ void AP_WebsocketTimer(int timeout_ms) {
         DeleteTimerQueue(timerQueue);
         return;
     }
+    LeaveCriticalSection(&timerMutex);
 }
 
 
@@ -988,6 +997,8 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     if (!sp_save_root) { sp_save_root = json_object(); }
     if (!messageQueue) { messageQueue = g_queue_new(); }
     if (!outgoing_queue) { outgoing_queue = g_queue_new(); }
+
+    InitializeCriticalSection(&timerMutex);
 
     g_random_set_seed((guint32)time(NULL));
     seeded_rand = g_rand_new();
