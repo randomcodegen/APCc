@@ -505,7 +505,6 @@ int recv_count = 0;
 static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len)
 {
     struct per_session_data* psd = (struct per_session_data*)user;
-    int result = 0;
 
     switch (reason)
     {
@@ -1097,13 +1096,13 @@ bool parse_response(json_t* root)
         if (temp_obj) { cmd = _strdup(json_string_value(temp_obj)); } else { printf("Error retreiving array element %i of incoming request.", i); return 0; }
         if (cmd && !strcmp(cmd, "RoomInfo"))
         {
-            if (temp_obj = json_object_get(obj, "password")) { lib_room_info.password_required = json_integer_value(obj); }
-            if (temp_obj = json_object_get(obj, "games")) 
+            if ((temp_obj = json_object_get(obj, "password"))) { lib_room_info.password_required = json_integer_value(obj); }
+            if ((temp_obj = json_object_get(obj, "games"))) 
             {
                 GArray* serv_games = g_array_new(true, true, sizeof(char*));
-                size_t i;
+                size_t j;
                 json_t* v;
-                json_array_foreach(temp_obj, i, v) 
+                json_array_foreach(temp_obj, j, v) 
                 {
                     char* game_val =  _strdup(json_string_value(v));
                     g_array_append_val(serv_games, game_val);
@@ -1111,7 +1110,7 @@ bool parse_response(json_t* root)
                 lib_room_info.games = serv_games;
             }
             
-            if (temp_obj = json_object_get(obj, "tags"))
+            if ((temp_obj = json_object_get(obj, "tags")))
             {
                 GArray* serv_tags = g_array_new(true, true, sizeof(char*));
                 size_t index;
@@ -1124,7 +1123,7 @@ bool parse_response(json_t* root)
                 lib_room_info.tags = serv_tags;
             }
             
-            if (temp_obj = json_object_get(obj, "version"))
+            if ((temp_obj = json_object_get(obj, "version")))
             {
                 const char* k;
                 json_t* v;
@@ -1136,7 +1135,7 @@ bool parse_response(json_t* root)
                 }
             }
             
-            if (temp_obj = json_object_get(obj, "permissions"))
+            if ((temp_obj = json_object_get(obj, "permissions")))
             {
                 GHashTable* serv_perms = g_hash_table_new(g_string_hash, g_string_equal);
                 const char* k;
@@ -1151,10 +1150,10 @@ bool parse_response(json_t* root)
             }
 
             
-            if (temp_obj = json_object_get(obj, "hint_cost")) { lib_room_info.hint_cost = (int)json_integer_value(temp_obj); }
-            if (temp_obj = json_object_get(obj, "location_check_points")) { lib_room_info.location_check_points = (int)json_integer_value(temp_obj); }
+            if ((temp_obj = json_object_get(obj, "hint_cost"))) { lib_room_info.hint_cost = (int)json_integer_value(temp_obj); }
+            if ((temp_obj = json_object_get(obj, "location_check_points"))) { lib_room_info.location_check_points = (int)json_integer_value(temp_obj); }
             
-            if (temp_obj = json_object_get(obj, "datapackage_checksums"))
+            if ((temp_obj = json_object_get(obj, "datapackage_checksums")))
             {
                 GHashTable* serv_datapkg_checksums = g_hash_table_new(g_string_hash, g_string_equal);
                 const char* k;
@@ -1167,8 +1166,8 @@ bool parse_response(json_t* root)
                 lib_room_info.datapackage_checksums = serv_datapkg_checksums;
             }
             
-            if (temp_obj = json_object_get(obj, "seed_name")) { lib_room_info.seed_name = _strdup(json_string_value(temp_obj)); }
-            if (temp_obj = json_object_get(obj, "time")) { lib_room_info.time = json_number_value(temp_obj); }
+            if ((temp_obj = json_object_get(obj, "seed_name"))) { lib_room_info.seed_name = _strdup(json_string_value(temp_obj)); }
+            if ((temp_obj = json_object_get(obj, "time"))) { lib_room_info.time = json_number_value(temp_obj); }
             if (!auth)
             {
                 json_t* req_t = json_object();
@@ -1199,28 +1198,28 @@ bool parse_response(json_t* root)
         {
             // Waiting for call to AP_Start()
             while (!ap_ready) {   Sleep(100); }
-            if (temp_obj = json_object_get(obj, "slot")) { ap_player_id = (int)json_integer_value(temp_obj); }
+            if ((temp_obj = json_object_get(obj, "slot"))) { ap_player_id = (int)json_integer_value(temp_obj); }
             // Avoid inconsistency if we disconnected before
             (*resetItemValues)();
             auth = true;
             ssl_success = auth && isSSL;
             refused = false;
             
-            if (temp_obj = json_object_get(obj, "checked_locations"))
+            if ((temp_obj = json_object_get(obj, "checked_locations")))
             {
-                size_t i;
+                size_t j;
                 json_t* v;
-                json_array_foreach(temp_obj, i, v)
+                json_array_foreach(temp_obj, j, v)
                 {
                     uint64_t loc_id = json_integer_value(v);
                     (*checklocfunc)(loc_id);
                 }
             }
-            if (temp_obj = json_object_get(obj, "players"))
+            if ((temp_obj = json_object_get(obj, "players")))
             {
-                size_t i;
+                size_t j;
                 json_t* v;
-                json_array_foreach(temp_obj, i, v)
+                json_array_foreach(temp_obj, j, v)
                 {
                     int team = 0;
                     int slot = 0;
@@ -1241,7 +1240,7 @@ bool parse_response(json_t* root)
                     g_array_append_val(map_players, player_struct);
                 }
             }
-            if (temp_obj = json_object_get(obj, "slot_info"))
+            if ((temp_obj = json_object_get(obj, "slot_info")))
             {
                 int player_id = 1;
                 const char* k;
@@ -1254,7 +1253,7 @@ bool parse_response(json_t* root)
                     player_id++;
                 }
             }
-            if (temp_obj = json_object_get(obj, "slot_data"))
+            if ((temp_obj = json_object_get(obj, "slot_data")))
             {
                 const char* k;
                 json_t* v;
@@ -1267,13 +1266,13 @@ bool parse_response(json_t* root)
                     else if (!strcmp("DeathLink_Amnesty", k)) { deathlink_amnesty = (int)json_integer_value(json_object_get(temp_obj, k)); cur_deathlink_amnesty = deathlink_amnesty; }
                 }
                 // Iterate over keys we are searching for callbacks
-                for (guint i = 0; i < slotdata_strings->len; i++)
+                for (guint j = 0; j < slotdata_strings->len; j++)
                 {
-                    if (slot_data_obj = json_object_get(temp_obj, g_array_index(slotdata_strings, GString*, i)->str))
+                    if ((slot_data_obj = json_object_get(temp_obj, g_array_index(slotdata_strings, GString*, j)->str)))
                     {
                         //Found a callback key in slot_data
                         
-                        GString* callback_key = g_array_index(slotdata_strings, GString*, i);
+                        GString* callback_key = g_array_index(slotdata_strings, GString*, j);
                         gpointer callback_func_ptr = NULL;
                         if ((callback_func_ptr = (void*)g_hash_table_lookup(map_slotdata_callback_raw, callback_key)) != NULL)
                         {
@@ -1301,16 +1300,16 @@ bool parse_response(json_t* root)
                             {
                                 //Only return data if base type is array
                                 GArray* j_array = g_array_new(false, false, sizeof(uint64_t));
-                                size_t i;
-                                json_t* v;
-                                json_array_foreach(slot_data_obj, i, v)
+                                size_t key;
+                                json_t* val;
+                                json_array_foreach(slot_data_obj, key, val)
                                 {
-                                    if (json_is_integer(v))
+                                    if (json_is_integer(val))
                                     {
-                                        uint64_t read_val = json_integer_value(v);
+                                        uint64_t read_val = json_integer_value(val);
                                         g_array_append_val(j_array, read_val);
                                     }
-                                    else { printf("AP_RegisterSlotDataIntArrayCallback array element in %s has wrong type: %s", callback_key->str, jtype_to_string(v)); }
+                                    else { printf("AP_RegisterSlotDataIntArrayCallback array element in %s has wrong type: %s", callback_key->str, jtype_to_string(val)); }
                                 }
                                 ((void(*)(GArray*))callback_func_ptr)(j_array);
                             }
@@ -1367,7 +1366,7 @@ bool parse_response(json_t* root)
                     json_t* checksum_obj;
                     json_object_foreach(datapkg_cache, dpkgc_k, dpkgc_v)
                     {
-                        if (loop_obj = json_object_get(dpkgc_v, ht_key->str))
+                        if ((loop_obj = json_object_get(dpkgc_v, ht_key->str)))
                         { 
                             //Found game in cache, compare checksums
                             found_game = true;
@@ -1422,7 +1421,7 @@ bool parse_response(json_t* root)
         else if (cmd && !strcmp(cmd, "Retrieved"))
         {
             json_t* keys_obj;
-            if (keys_obj = json_object_get(obj, "keys"))
+            if ((keys_obj = json_object_get(obj, "keys")))
             {
                 const char* k;
                 json_t* v;
@@ -1572,14 +1571,14 @@ bool parse_response(json_t* root)
                 {
                     GString* text = g_string_new(NULL);
                     json_t* data_obj = json_object_get(obj, "data");
-                    int i;
+                    int j;
                     json_t* v;
-                    json_array_foreach(data_obj, i, v)
+                    json_array_foreach(data_obj, j, v)
                     { 
                         json_t* text_obj = json_object_get(v, "text");
-                        json_t* type_obj = json_object_get(v, "type");
+                        json_t* type2_obj = json_object_get(v, "type");
                         //TODO: Check if alias works correctly
-                        if (type_obj && !strcmp(json_string_value(type_obj), "player_id")) {
+                        if (type2_obj && !strcmp(json_string_value(type2_obj), "player_id")) {
                             g_string_append(text, getPlayer(0, (int)json_integer_value(text_obj))->alias);
                         }
                         else if (strcmp(json_string_value(text_obj),"")) 
@@ -1596,9 +1595,9 @@ bool parse_response(json_t* root)
         {
             GArray* locations = g_array_new(true, true, sizeof(struct AP_NetworkItem*));
             json_t* locs_obj = json_object_get(obj, "locations");
-            int i;
+            int j;
             json_t* v;
-            json_array_foreach(locs_obj, i, v)
+            json_array_foreach(locs_obj, j, v)
             {
                 json_t* item_obj = json_object_get(v, "item");
                 uint64_t item_id = json_integer_value(item_obj);
@@ -1620,13 +1619,13 @@ bool parse_response(json_t* root)
             uint64_t item_idx = json_integer_value(index_obj);
             bool notify = false;
             json_t* items_obj = json_object_get(obj, "items");
-            int i;
+            int j;
             json_t* v;
-            json_array_foreach(items_obj, i, v)
+            json_array_foreach(items_obj, j, v)
             {
                 json_t* item_obj = json_object_get(v, "item");
                 uint64_t item_id = json_integer_value(item_obj);
-                notify = (item_idx == 0 && last_item_idx <= i && multiworld) || item_idx != 0;
+                notify = (item_idx == 0 && last_item_idx <= j && multiworld) || item_idx != 0;
                 json_t* player_obj = json_object_get(v, "player");
                 struct AP_NetworkPlayer* sender = getPlayer(0, (int)json_integer_value(player_obj));
                 (*getitemfunc)(item_id, sender->slot, notify);
@@ -1664,15 +1663,15 @@ bool parse_response(json_t* root)
         else if (cmd && !strcmp(cmd, "RoomUpdate"))
         {
             json_t* checked_locs_obj = json_object_get(obj, "checked_locations");
-            size_t i = 0;
+            size_t j = 0;
             json_t* v = NULL;
-            json_array_foreach(checked_locs_obj, i, v)
+            json_array_foreach(checked_locs_obj, j, v)
             {
                 uint64_t loc_id = json_integer_value(v);
                 (*checklocfunc)(loc_id);
             }
             json_t* players_obj = json_object_get(obj, "players");
-            json_array_foreach(players_obj, i, v)
+            json_array_foreach(players_obj, j, v)
             {
                 int slot = 0;
                 char* alias = NULL;
@@ -1695,9 +1694,9 @@ bool parse_response(json_t* root)
         {
             if (!enable_deathlink) continue;
             json_t* tags_obj = json_object_get(obj, "tags");
-            size_t i = 0;
+            size_t j = 0;
             json_t* v = NULL;
-            json_array_foreach(tags_obj, i, v)
+            json_array_foreach(tags_obj, j, v)
             {
                 if (!strcmp(json_string_value(v), "DeathLink"))
                 {
@@ -1759,7 +1758,7 @@ void AP_Shutdown() {
     recvdeath = NULL;
     setreplyfunc = NULL;
     g_hash_table_destroy(map_serverdata_typemanage);
-    uint64_t last_item_idx = 0;
+    last_item_idx = 0;
     sp_save_path="";
     g_hash_table_destroy(map_server_data);
     map_server_data = g_hash_table_new(g_string_hash, g_string_equal);
@@ -1904,21 +1903,21 @@ char* AP_GetItemName(uint64_t id) {
     return getItemName(ap_game, id);
 }
 
-void AP_SetServerData(struct AP_SetServerDataRequest* request) {
+void AP_SetServerData(struct AP_SetServerDataRequest* sd_request) {
     if (!map_serverdata_typemanage) { map_serverdata_typemanage = g_hash_table_new(g_string_hash, g_string_equal); }
-    request->status = Pending;
+    sd_request->status = Pending;
     json_t* req_t = json_object();
     json_t* req_array = json_array();
     json_t* op_array = json_array();
     json_object_set_new(req_t, "cmd", json_string("Set"));
-    json_object_set_new(req_t, "key", json_string(request->key));
-    switch (request->type)
+    json_object_set_new(req_t, "key", json_string(sd_request->key));
+    switch (sd_request->type)
     {
     case Int:
-        for (guint i = 0; i < request->operations->len; i++)
+        for (guint i = 0; i < sd_request->operations->len; i++)
         {
             json_t* op_obj = json_object();
-            struct AP_DataStorageOperation* ap_dso = g_array_index(request->operations, struct AP_DataStorageOperation*, i);
+            struct AP_DataStorageOperation* ap_dso = g_array_index(sd_request->operations, struct AP_DataStorageOperation*, i);
             json_object_set_new(op_obj, "operation", json_string(ap_dso->operation));
             json_object_set_new(op_obj, "value", json_integer(*(int*)ap_dso->value));
             json_array_append_new(op_array, op_obj);
@@ -1926,10 +1925,10 @@ void AP_SetServerData(struct AP_SetServerDataRequest* request) {
         json_object_set_new(req_t, "operations", op_array);
         break;
     case Double:
-        for (guint i = 0; i < request->operations->len; i++)
+        for (guint i = 0; i < sd_request->operations->len; i++)
         {
             json_t* op_obj = json_object();
-            struct AP_DataStorageOperation* ap_dso = g_array_index(request->operations, struct AP_DataStorageOperation*, i);
+            struct AP_DataStorageOperation* ap_dso = g_array_index(sd_request->operations, struct AP_DataStorageOperation*, i);
             json_object_set_new(op_obj, "operation", json_string(ap_dso->operation));
             json_object_set_new(op_obj, "value", json_real(*(double*)ap_dso->value));
             json_array_append_new(op_array, op_obj);
@@ -1937,21 +1936,21 @@ void AP_SetServerData(struct AP_SetServerDataRequest* request) {
         json_object_set_new(req_t, "operations", op_array);
         break;
     default:
-        for (guint i = 0; i < request->operations->len; i++)
+        for (guint i = 0; i < sd_request->operations->len; i++)
         {
             json_t* op_obj = json_object();
-            struct AP_DataStorageOperation* ap_dso = g_array_index(request->operations, struct AP_DataStorageOperation*, i);
+            struct AP_DataStorageOperation* ap_dso = g_array_index(sd_request->operations, struct AP_DataStorageOperation*, i);
             json_object_set_new(op_obj, "operation", json_string(ap_dso->operation));
             json_object_set_new(op_obj, "value", json_string((char*)ap_dso->value));
             json_array_append_new(op_array, op_obj);
         }
         json_object_set_new(req_t, "operations", op_array);
-        json_object_set_new(req_t, "default", json_string((char*)request->default_value));
+        json_object_set_new(req_t, "default", json_string((char*)sd_request->default_value));
         break;
     }
-    json_object_set_new(req_t, "want_reply", json_integer(request->want_reply));
-    GString* gs_key = g_string_new(request->key);
-    g_hash_table_insert(map_serverdata_typemanage, gs_key, &request->type);
+    json_object_set_new(req_t, "want_reply", json_integer(sd_request->want_reply));
+    GString* gs_key = g_string_new(sd_request->key);
+    g_hash_table_insert(map_serverdata_typemanage, gs_key, &sd_request->type);
     if (multiworld)
     {
         json_array_append(req_array, req_t);
@@ -1963,7 +1962,7 @@ void AP_SetServerData(struct AP_SetServerDataRequest* request) {
         //TODO: SP test
         localSetServerData(req_t);
     }
-    request->status = Done;
+    sd_request->status = Done;
 }
 
 void AP_RegisterSetReplyCallback(void (*f_setreply)(struct AP_SetReply* reply)) {
@@ -2000,12 +1999,12 @@ void AP_SetNotify_Type(char* key, AP_DataType type) {
     AP_SetNotify_Keylist(keylist);
 }
 
-void AP_GetServerData(struct AP_GetServerDataRequest* request) {
+void AP_GetServerData(struct AP_GetServerDataRequest* sd_request) {
     if (!map_server_data) { map_server_data = g_hash_table_new(g_string_hash, g_string_equal); }
-    request->status = Pending;
-    GString* gs_key = g_string_new(request->key);
+    sd_request->status = Pending;
+    GString* gs_key = g_string_new(sd_request->key);
     if (g_hash_table_lookup(map_server_data, gs_key) != NULL) { printf("Returning without action.\n"); return; }
-    g_hash_table_insert(map_server_data, gs_key, request);
+    g_hash_table_insert(map_server_data, gs_key, sd_request);
 
     if (multiworld)
     {
@@ -2013,7 +2012,7 @@ void AP_GetServerData(struct AP_GetServerDataRequest* request) {
         json_t* req_array = json_array();
         json_t* req_key_array = json_array();
         json_object_set_new(req_t, "cmd", json_string("Get"));
-        json_array_append_new(req_key_array, json_string(request->key));
+        json_array_append_new(req_key_array, json_string(sd_request->key));
         json_object_set_new(req_t, "keys", req_key_array);
         json_array_append_new(req_array, req_t);
         g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
@@ -2160,7 +2159,7 @@ void parseDataPkg(json_t* new_datapkg) {
         //Need to replace specific game data in the old datapackage
         json_t* data_obj;
         
-        if (data_obj = json_object_get(new_datapkg, "data"))
+        if ((data_obj = json_object_get(new_datapkg, "data")))
         { 
             json_t* new_games_obj = json_object_get(data_obj, "games");
             json_t* cache_games_obj = json_object_get(datapkg_cache, "games");
@@ -2181,11 +2180,11 @@ void parseDataPkg(json_t* new_datapkg) {
     }
 }
 
-char* messagePartsToPlainText(GArray* messageParts) {
+char* messagePartsToPlainText(GArray* messagePartsIn) {
     GString* out = g_string_new(NULL);
-    for (guint i = 0; i < messageParts->len; i++)
+    for (guint i = 0; i < messagePartsIn->len; i++)
     {
-        g_string_append(out , g_array_index(messageParts, struct AP_MessagePart*, i)->text);
+        g_string_append(out , g_array_index(messagePartsIn, struct AP_MessagePart*, i)->text);
     }
     return out->str;
 }
