@@ -9,8 +9,6 @@
 #include <time.h>
 #include <signal.h>
 #include <string.h>
-
-//#include <json-c/json.h>
 #include <jansson.h>
 #include <libwebsockets.h>
 #include <glib.h>
@@ -289,6 +287,5 @@ void AP_SetNotify_Keylist(GHashTable* keylist);
 // Single Key version of above for convenience
 void AP_SetNotify_Type(char* key, AP_DataType type);
 
-void AP_WebsocketTimer(int timeout_ms);
 int AP_WebsocketSulInit(uint32_t timeout_ms);
 void service_loop();
