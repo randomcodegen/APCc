@@ -736,7 +736,7 @@ void service_loop()
 {
     while (context) {
         // Service any pending events (including SUL callbacks)
-        lws_service(context, 0);
+        AP_WebService();
         // Small sleep to prevent CPU spinning
         Sleep(1);
     }
