@@ -290,3 +290,5 @@ void AP_SetNotify_Keylist(GHashTable* keylist);
 void AP_SetNotify_Type(char* key, AP_DataType type);
 
 void AP_WebsocketTimer(int timeout_ms);
+int AP_WebsocketSulInit(uint32_t timeout_ms);
+void service_loop();

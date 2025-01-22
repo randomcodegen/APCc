@@ -695,49 +695,89 @@ static struct lws_protocols protocols[] =
     LWS_PROTOCOL_LIST_TERM /* terminator */
 };
 
+// SUL Websocket Callback
+struct sul_s {
+    lws_sorted_usec_list_t sul;
+    struct lws_context* context;
+    int counter;
+    int64_t timeout_us;
+};
+static struct sul_s sul_data;
 
-// Handle to the timer queue
-HANDLE timerQueue;
-CRITICAL_SECTION timerMutex;
-bool lwsServiceActive = false;
-
-typedef VOID(CALLBACK* TIMER_ROUTINE) (
-    PVOID lpParameter,
-    BOOLEAN TimerOrWaitFired
-    );
-
-void CALLBACK TimerRoutine(PVOID lpParameter, BOOLEAN TimerOrWaitFired) {
-    EnterCriticalSection(&timerMutex);
-
-    if (!lwsServiceActive) {
-        lwsServiceActive = true;
-        if (context) lws_service(context, 0);
-        lwsServiceActive = false;
-    }
-
-    LeaveCriticalSection(&timerMutex);
+// Callback function that will be called by sul
+static void sul_cb(lws_sorted_usec_list_t* sul)
+{
+    struct sul_s* sulstruct = lws_container_of(sul, struct sul_s, sul);
+    lws_sul_schedule(sulstruct->context, 0, &sulstruct->sul, sul_cb, sulstruct->timeout_us);
 }
 
-// Create and start the timer for the Websocket Callback Checks
-void AP_WebsocketTimer(int timeout_ms) {
-    EnterCriticalSection(&timerMutex);
-    timerQueue = CreateTimerQueue();
-    if (timerQueue == NULL) {
-        fprintf(stderr, "CreateTimerQueue failed: %d\n", GetLastError());
-        return;
-    }
+int AP_WebsocketSulInit(uint32_t timeout_ms)
+{
+    memset(&sul_data, 0, sizeof(sul_data));
 
-    // Create a timer
-    HANDLE timer;
-    if (!CreateTimerQueueTimer(&timer, timerQueue, (TIMER_ROUTINE)TimerRoutine,
-        context, timeout_ms, timeout_ms, 0)) { // Trigger every timeout_ms milliseconds
-        fprintf(stderr, "CreateTimerQueueTimer failed: %d\n", GetLastError());
-        DeleteTimerQueue(timerQueue);
-        return;
-    }
-    LeaveCriticalSection(&timerMutex);
+    sul_data.context = context;
+    sul_data.counter = 0;
+
+    sul_data.timeout_us = (int64_t)timeout_ms * 1000;
+
+    lws_sul_schedule(context, 0, &sul_data.sul, sul_cb, sul_data.timeout_us);
+
+    return TRUE;
 }
 
+void AP_WebsocketSulCleanup()
+{
+    // Cancel any pending sul callback
+    lws_sul_schedule(context, 0, &sul_data.sul, NULL, LWS_SET_TIMER_USEC_CANCEL);
+}
+
+// Main service loop - required for SUL to work
+void service_loop()
+{
+    while (context) {
+        // Service any pending events (including SUL callbacks)
+        lws_service(context, 0);
+        // Small sleep to prevent CPU spinning
+        Sleep(1);
+    }
+}
+
+struct send_data_sul {
+    lws_sorted_usec_list_t sul;
+    struct lws_context* context;
+    struct lws* wsi;
+    const char* data;
+    size_t len;
+};
+
+static void send_data_cb(lws_sorted_usec_list_t* sul)
+{
+    struct send_data_sul* send_data = lws_container_of(sul, struct send_data_sul, sul);
+
+    if (send_data->wsi) {
+        // Request a writable callback
+        lws_callback_on_writable(send_data->wsi);
+
+        // Reschedule for next send
+        // Example: Send every 100ms (100000 microseconds)
+        lws_sul_schedule(send_data->context, 0, &send_data->sul, send_data_cb, 100000);
+    }
+}
+
+// Initialize periodic data sending
+void start_periodic_send(struct lws* wsi, const char* data, size_t len)
+{
+    static struct send_data_sul send_data;
+
+    memset(&send_data, 0, sizeof(send_data));
+    send_data.context = context;
+    send_data.wsi = wsi;
+    send_data.data = data;
+    send_data.len = len;
+
+    // Schedule first send
+    lws_sul_schedule(context, 0, &send_data.sul, send_data_cb, 100000);
+}
 
 void AP_SetClientVersion(struct AP_NetworkVersion* version) {
     if (!client_version) { client_version = AP_NetworkVersion_new(0, 2, 6); }
@@ -997,8 +1037,6 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     if (!sp_save_root) { sp_save_root = json_object(); }
     if (!messageQueue) { messageQueue = g_queue_new(); }
     if (!outgoing_queue) { outgoing_queue = g_queue_new(); }
-
-    InitializeCriticalSection(&timerMutex);
 
     g_random_set_seed((guint32)time(NULL));
     seeded_rand = g_rand_new();
