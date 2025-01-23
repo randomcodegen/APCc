@@ -957,18 +957,13 @@ void AP_WebService() {
     /* Connect if we are not connected to the server. */
     if (!web_socket)
     {
-        size_t buffer_size = strlen("wss://") + strlen(ap_ip) + 1;
-        char* ip_buf = malloc(buffer_size);
         struct lws_client_connect_info ccinfo;
         memset(&ccinfo, 0, sizeof(ccinfo));
         ccinfo.context = context;
-        if (isSSL) { sprintf(ip_buf, "%s%s", "wss://", ap_ip); ccinfo.address = ip_buf; ccinfo.ssl_connection = true; }
-        else { sprintf(ip_buf, "%s%s", "ws://", ap_ip); ccinfo.address = ip_buf; ccinfo.ssl_connection = false; }
-        ccinfo.address = ap_ip;
         ccinfo.port = ap_port;
         ccinfo.path = "/";
-        //ccinfo.host = lws_canonical_hostname(context);
-        ccinfo.host = ccinfo.address;
+        ccinfo.host = ap_ip;
+        ccinfo.address = ap_ip;
         ccinfo.origin = "origin";
         ccinfo.protocol = protocols[PROTOCOL_AP].name;
         web_socket = lws_client_connect_via_info(&ccinfo);
@@ -1037,6 +1032,7 @@ void AP_Start() {
 
 void AP_Init(const char* ip, int port, const char* game, const char* player_name, const char* passwd)
 {
+    lws_set_log_level(LLL_DEBUG | LLL_INFO | LLL_NOTICE | LLL_WARN | LLL_ERR, NULL);
     multiworld = true;
     if (!slotdata_strings) { slotdata_strings = g_array_new(true, true, sizeof(GString*)); }
     if (!sp_save_root) { sp_save_root = json_object(); }
@@ -1068,7 +1064,7 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     lws_info.gid = -1;
     lws_info.uid = -1;
     // TODO: Does this work? Try WSS to see if it fails
-    //lws_info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+    lws_info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
 
     context = lws_create_context(&lws_info);
 
