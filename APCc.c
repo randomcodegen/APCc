@@ -962,10 +962,12 @@ void AP_WebService() {
         ccinfo.context = context;
         ccinfo.port = ap_port;
         ccinfo.path = "/";
-        ccinfo.host = ap_ip;
+        ccinfo.host = lws_canonical_hostname(context);
         ccinfo.address = ap_ip;
         ccinfo.origin = "origin";
         ccinfo.protocol = protocols[PROTOCOL_AP].name;
+        if (isSSL) ccinfo.ssl_connection = LCCSCF_USE_SSL | LCCSCF_ALLOW_SELFSIGNED | LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK;
+        else ccinfo.ssl_connection = 0;
         web_socket = lws_client_connect_via_info(&ccinfo);
         lws_service(context, 0);
     }
