@@ -4,6 +4,12 @@
 bool sp_testing = false;
 
 // Helper funcs
+void json_print(const char* key, json_t* j)
+{
+    char* jdump = json_dumps(j, JSON_DECODE_ANY);
+    printf("%s:\n%s\n", key, jdump);
+    free(jdump);
+}
 
 const char* jtype_to_string(json_t* j) 
 {
@@ -1901,6 +1907,40 @@ char* AP_GetLocationName(uint64_t id) {
 
 char* AP_GetItemName(uint64_t id) {
     return getItemName(ap_game, id);
+}
+
+char* AP_GetLocalHintDataPrefix() {
+    char* buffer = (char*)malloc(32);
+    if (buffer == NULL) {
+        fprintf(stderr, "Memory allocation failed!\n");
+        return NULL;
+    }
+    struct AP_NetworkPlayer* player_data = g_array_index(map_players, struct AP_NetworkPlayer*, ap_player_id);
+    sprintf(buffer, "_read_hints_%d_%d", player_data->team, player_data->slot);
+    return buffer;
+}
+
+json_t* AP_GetLocalHints() {
+    char* buffer = (char*)malloc(32);
+    if (buffer == NULL) {
+        fprintf(stderr, "Memory allocation failed!\n");
+        return NULL;
+    }
+    struct AP_NetworkPlayer* player_data = g_array_index(map_players, struct AP_NetworkPlayer*, ap_player_id);
+    sprintf(buffer, "_read_hints_%d_%d", player_data->team, player_data->slot);
+
+    struct AP_GetServerDataRequest* hint_serverdata_request = AP_GetServerDataRequest_new(Pending, buffer, &last_item_idx, Raw);
+    AP_GetServerData(hint_serverdata_request);
+    while (hint_serverdata_request->status != Done) {
+        //printf("Waiting");
+    }
+    json_t* hint_obj = hint_serverdata_request->value;
+
+    free(buffer);
+
+    json_print("hints",hint_obj);
+
+    return hint_serverdata_request->value;
 }
 
 void AP_SetServerData(struct AP_SetServerDataRequest* sd_request) {
