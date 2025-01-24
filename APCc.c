@@ -1034,7 +1034,7 @@ void AP_Start() {
 
 void AP_Init(const char* ip, int port, const char* game, const char* player_name, const char* passwd)
 {
-    lws_set_log_level(LLL_DEBUG | LLL_INFO | LLL_NOTICE | LLL_WARN | LLL_ERR, NULL);
+   // lws_set_log_level(LLL_DEBUG | LLL_INFO | LLL_NOTICE | LLL_WARN | LLL_ERR, NULL);
     multiworld = true;
     if (!slotdata_strings) { slotdata_strings = g_array_new(true, true, sizeof(GString*)); }
     if (!sp_save_root) { sp_save_root = json_object(); }
