@@ -1512,7 +1512,7 @@ bool parse_response(json_t* root)
                     struct AP_NetworkPlayer* recv_player = getPlayer(0, (int)json_integer_value(rec_obj));
                     struct AP_NetworkPlayer* recv_item_player = getPlayer(0, (int)json_integer_value(item_recvplayer_obj));
                     if (!strcmp(recv_player->alias, local_player->alias) || (strcmp(recv_item_player->alias, local_player->alias))) { continue; }
-                    char* item_name = getItemName(ap_game, item_id);
+                    char* item_name = getItemName(recv_item_player->game, item_id);
                     GArray* messageparts_array = g_array_new(true, true, sizeof(struct AP_MessagePart*));
                     struct AP_MessagePart* msg_p = AP_MessagePart_new(item_name, AP_ItemText);
                     g_array_append_val(messageparts_array, msg_p);
@@ -1533,8 +1533,8 @@ bool parse_response(json_t* root)
                     json_t* found_obj = json_object_get(obj, "found");
                     struct AP_NetworkPlayer* send_player = getPlayer(0, (int)json_integer_value(item_recvplayer_obj));
                     struct AP_NetworkPlayer* recv_player = getPlayer(0, (int)json_integer_value(rec_obj));
-                    char* item_name = getItemName(ap_game, item_id);
-                    char* loc_name = getLocationName(ap_game, loc_id);
+                    char* item_name = getItemName(recv_player->game, item_id);
+                    char* loc_name = getLocationName(send_player->game, loc_id);
                     bool checked = json_integer_value(found_obj);
                     GArray* messageparts_array = g_array_new(true, true, sizeof(struct AP_MessagePart*));
                     struct AP_MessagePart* msg_p = AP_MessagePart_new("Item ", AP_NormalText);
