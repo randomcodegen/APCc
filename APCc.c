@@ -1505,14 +1505,13 @@ bool parse_response(json_t* root)
                 char* type = _strdup(json_string_value(type_obj));
                 if ((!strcmp(type, "ItemSend")) || (!strcmp(type, "ItemCheat"))) 
                 {
-                    json_t* rec_obj = json_object_get(obj, "receiving");
                     json_t* item_obj = json_object_get(obj, "item");
                     uint64_t item_id = json_integer_value(json_object_get(item_obj, "item"));
                     json_t* item_recvplayer_obj = json_object_get(item_obj, "player");
-                    struct AP_NetworkPlayer* recv_player = getPlayer(0, (int)json_integer_value(rec_obj));
+                    struct AP_NetworkPlayer* recv_player = getPlayer(0, (int)json_integer_value(json_object_get(obj, "receiving")));
                     struct AP_NetworkPlayer* recv_item_player = getPlayer(0, (int)json_integer_value(item_recvplayer_obj));
                     if (!strcmp(recv_player->alias, local_player->alias) || (strcmp(recv_item_player->alias, local_player->alias))) { continue; }
-                    char* item_name = getItemName(recv_item_player->game, item_id);
+                    char* item_name = getItemName(recv_player->game, item_id);
                     GArray* messageparts_array = g_array_new(true, true, sizeof(struct AP_MessagePart*));
                     struct AP_MessagePart* msg_p = AP_MessagePart_new(item_name, AP_ItemText);
                     g_array_append_val(messageparts_array, msg_p);
@@ -2155,11 +2154,11 @@ void parseDataPkgCache() {
         json_t* itemv;
         const char* lock;
         json_t* locv;
+        map_item_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
+        map_location_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
+        map_game_to_data = g_hash_table_new(g_string_hash, g_string_equal);
         json_object_foreach(cache_games_obj, k, v)
         {
-            map_item_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
-            map_location_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
-            map_game_to_data = g_hash_table_new(g_string_hash, g_string_equal);
             struct AP_GameData* game_data = AP_GameData_new(map_item_id_name, map_location_id_name);
             items_obj = json_object_get(v, "item_name_to_id");
             locs_obj = json_object_get(v, "location_name_to_id");
