@@ -558,7 +558,7 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
                 char* end_pos = psd->message_buffer->str + psd->message_buffer->len;
 
                 while (current_pos < end_pos) {
-                    json_t* json = json_loads(current_pos, JSON_DISABLE_EOF_CHECK, &jerror);
+                    json_t* json = json_loads(current_pos, JSON_DISABLE_EOF_CHECK | JSON_DECODE_INT_AS_REAL, &jerror);
 
                     if (!json) {
                         if (jerror.text != NULL) {
@@ -1287,7 +1287,7 @@ bool parse_response(json_t* root)
                         if ((callback_func_ptr = (void*)g_hash_table_lookup(map_slotdata_callback_int, callback_key)) != NULL)
                         {
                             // Int callback
-                            if (json_is_integer(slot_data_obj))
+                            if (json_is_integer(slot_data_obj) || json_is_real(slot_data_obj))
                             {
                                 //Only return data if type is int
                                 uint64_t json_val = (uint64_t)json_integer_value(slot_data_obj);
@@ -1308,7 +1308,7 @@ bool parse_response(json_t* root)
                                 json_t* val;
                                 json_array_foreach(slot_data_obj, key, val)
                                 {
-                                    if (json_is_integer(val))
+                                    if (json_is_integer(val) || json_is_real(val))
                                     {
                                         uint64_t read_val = json_integer_value(val);
                                         g_array_append_val(j_array, read_val);
