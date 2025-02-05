@@ -700,6 +700,15 @@ static struct lws_protocols protocols[] =
     LWS_PROTOCOL_LIST_TERM /* terminator */
 };
 
+static const struct lws_extension extensions[] = {
+        {
+                "permessage-deflate", lws_extension_callback_pm_deflate,
+                "permessage-deflate" "; client_no_context_takeover"
+                 "; client_max_window_bits"
+        },
+        { NULL, NULL, NULL /* terminator */ }
+};
+
 // SUL Websocket Callback
 struct sul_s {
     lws_sorted_usec_list_t sul;
@@ -1067,6 +1076,9 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     lws_info.uid = -1;
     // TODO: Does this work? Try WSS to see if it fails
     lws_info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+    // TODO: Implement per-message-deflate
+    //  lws_create_context: WITHOUT_EXTENSIONS but exts ptr set
+    lws_info.extensions = extensions;
 
     context = lws_create_context(&lws_info);
 
