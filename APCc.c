@@ -1074,10 +1074,7 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     lws_info.protocols = protocols;
     lws_info.gid = -1;
     lws_info.uid = -1;
-    // TODO: Does this work? Try WSS to see if it fails
     lws_info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
-    // TODO: Implement per-message-deflate
-    //  lws_create_context: WITHOUT_EXTENSIONS but exts ptr set
     lws_info.extensions = extensions;
 
     context = lws_create_context(&lws_info);
@@ -2202,6 +2199,7 @@ void parseDataPkg(json_t* new_datapkg) {
         json_t* data_obj = json_object_get(new_datapkg, "data");
         //No cache to compare to, that means this is our full new datapackage
         json_dump_file(data_obj, datapkg_cache_path, 0);
+        datapkg_cache = json_load_file(datapkg_cache_path, 0, &jerror);
     }
     else
     {
@@ -2225,8 +2223,9 @@ void parseDataPkg(json_t* new_datapkg) {
             printf("parseDataPkg received invalid datapackage json.\n");
         }
         json_dump_file(datapkg_cache, datapkg_cache_path, 0);
-        parseDataPkgCache();
+        datapkg_cache = json_load_file(datapkg_cache_path, 0, &jerror);
     }
+    parseDataPkgCache();
 }
 
 char* messagePartsToPlainText(GArray* messagePartsIn) {
