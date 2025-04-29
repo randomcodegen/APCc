@@ -430,10 +430,6 @@ json_error_t jerror;
 // Data Maps
 //std::map<int, AP_NetworkPlayer> map_players;
 GArray* map_players = NULL;
-//std::map<std::pair<std::string, int64_t>, std::string> map_location_id_name;
-GHashTable* map_location_id_name = NULL;
-//std::map<std::pair<std::string, int64_t>, std::string> map_item_id_name;
-GHashTable* map_item_id_name = NULL;
 GHashTable* map_game_to_data = NULL;
 
 // Callback function pointers
@@ -1757,10 +1753,6 @@ void AP_Shutdown() {
     g_array_free(map_players, true);
     //TODO: free the individual structs in the arrays and hash_tables as well
     map_players = g_array_new(true, true, sizeof(struct AP_NetworkPlayer*));
-    g_hash_table_destroy(map_location_id_name);
-    map_location_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
-    g_hash_table_destroy(map_item_id_name);
-    map_item_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
     g_hash_table_destroy(map_game_to_data);
     map_game_to_data = g_hash_table_new(g_string_hash, g_string_equal);
     resetItemValues = NULL;
@@ -1943,8 +1935,6 @@ json_t* AP_GetLocalHints() {
     json_t* hint_obj = hint_serverdata_request->value;
 
     free(buffer);
-
-    json_print("hints",hint_obj);
 
     return hint_serverdata_request->value;
 }
@@ -2163,11 +2153,11 @@ void parseDataPkgCache() {
         json_t* itemv;
         const char* lock;
         json_t* locv;
-        map_item_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
-        map_location_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
         map_game_to_data = g_hash_table_new(g_string_hash, g_string_equal);
         json_object_foreach(cache_games_obj, k, v)
         {
+            GHashTable* map_item_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
+            GHashTable* map_location_id_name = g_hash_table_new(g_int64_hash, g_int64_equal);
             struct AP_GameData* game_data = AP_GameData_new(map_item_id_name, map_location_id_name);
             items_obj = json_object_get(v, "item_name_to_id");
             locs_obj = json_object_get(v, "location_name_to_id");
