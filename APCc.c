@@ -840,6 +840,21 @@ void AP_SendItem(uint64_t idx) {
     }
 }
 
+void AP_SendMsg(char* msg_in) {
+    if (multiworld) {
+        json_t* req_t = json_object();
+        json_t* req_array = json_array();
+        json_object_set_new(req_t, "cmd", json_string("Say"));
+        json_object_set_new(req_t, "text", json_string(msg_in));
+        json_array_append_new(req_array, req_t);
+        g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
+        AP_SendWeb();
+    }
+    else {
+        // TODO: Implement SP
+    }
+}
+
 //TODO: Implement SP
 void AP_SendLocationScouts(GArray* locations, int create_as_hint) {
     if (multiworld) {

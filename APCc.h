@@ -138,6 +138,9 @@ void AP_SetLocationInfoCallback(void (*f_locrecv)(GArray*));
 // Sends LocationCheck for given index
 void AP_SendItem(uint64_t);
 
+// Send a chat message to the server
+void AP_SendMsg(char*);
+
 // Called when Story completed, sends StatusUpdate
 void AP_StoryComplete();
 
