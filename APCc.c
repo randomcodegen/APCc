@@ -1284,10 +1284,17 @@ bool parse_response(json_t* root)
                 json_t* slot_data_obj;
                 json_object_foreach(temp_obj, k, v)
                 {
-                    if (!strcmp("death_link", k)) { enable_deathlink = (int)json_integer_value(json_object_get(temp_obj, k)) && deathlinksupported; }
-                    else if(!strcmp("DeathLink", k)) { enable_deathlink = (int)json_integer_value(json_object_get(temp_obj, k)) && deathlinksupported; }
-                    if (!strcmp("death_link_amnesty", k)) { deathlink_amnesty = (int)json_integer_value(json_object_get(temp_obj, k)); cur_deathlink_amnesty = deathlink_amnesty; }
-                    else if (!strcmp("DeathLink_Amnesty", k)) { deathlink_amnesty = (int)json_integer_value(json_object_get(temp_obj, k)); cur_deathlink_amnesty = deathlink_amnesty; }
+                    if (!strcmp("death_link", k)) 
+                        enable_deathlink = (int)json_integer_value(v) && deathlinksupported;
+                    else if (!strcmp("DeathLink", k)) 
+                        enable_deathlink = (int)json_integer_value(v) && deathlinksupported;
+
+                    if (!strcmp("death_link_amnesty", k)) {
+                        deathlink_amnesty = (int)json_integer_value(v); cur_deathlink_amnesty = deathlink_amnesty;
+                    }
+                    else if (!strcmp("DeathLink_Amnesty", k)) {
+                        deathlink_amnesty = (int)json_integer_value(v); cur_deathlink_amnesty = deathlink_amnesty;
+                    }
                 }
                 // Iterate over keys we are searching for callbacks
                 for (guint j = 0; j < slotdata_strings->len; j++)
