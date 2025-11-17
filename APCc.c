@@ -941,14 +941,12 @@ void AP_DeathLinkSend() {
     json_t* req_array = json_array();
     json_t* time_obj = json_object();
     json_t* source_obj = json_object();
-    json_t* req_data_array = json_array();
+    json_t* req_data_obj = json_object();
     json_t* req_tags_array = json_array();
     json_object_set_new(req_t, "cmd", json_string("Bounce"));
-    json_object_set_new(time_obj, "time", json_integer(timestamp_sec));
-    json_object_set_new(source_obj, "source", json_string(ap_player_name));
-    json_array_append_new(req_data_array, time_obj);
-    json_array_append_new(req_data_array, source_obj);
-    json_object_set_new(req_t, "data", req_data_array);
+    json_object_set_new(req_data_obj, "time", json_integer(timestamp_sec));
+    json_object_set_new(req_data_obj, "source", json_string(ap_player_name));
+    json_object_set_new(req_t, "data", req_data_obj);
     json_array_append_new(req_tags_array, json_string("DeathLink"));
     json_object_set_new(req_t, "tags", req_tags_array);
     json_array_append_new(req_array, req_t);
