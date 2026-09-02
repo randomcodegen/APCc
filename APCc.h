@@ -245,7 +245,7 @@ int AP_GetPlayerID();
 
 
 struct AP_GetServerDataRequest {
-    AP_RequestStatus status;
+    gint status; /* AP_RequestStatus. Access with g_atomic_int_* */
     char* key;
     void* value;
     AP_DataType type;
@@ -257,7 +257,7 @@ struct AP_DataStorageOperation {
 };
 
 struct AP_SetServerDataRequest {
-    AP_RequestStatus status;
+    gint status; /* AP_RequestStatus. access with g_atomic_int_* */
     char* key;
     //std::vector<AP_DataStorageOperation> operations;
     GArray* operations;

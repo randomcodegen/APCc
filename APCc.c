@@ -1,5 +1,14 @@
 #include "APCc.h"
 
+static GRecMutex state_mutex;
+static gint shutting_down = FALSE;
+static gint service_loop_running = FALSE;
+static gint active_web_services = 0;
+static gint connection_attempt_failed = FALSE;
+
+#define AP_LOCK() g_rec_mutex_lock(&state_mutex)
+#define AP_UNLOCK() g_rec_mutex_unlock(&state_mutex)
+
 // For testing sp functions
 bool sp_testing = false;
 
@@ -245,7 +254,7 @@ void AP_CountdownMessage_free(struct AP_CountdownMessage* countdownMessage) {
 struct AP_SetServerDataRequest* AP_SetServerDataRequest_new(AP_RequestStatus status, const char* key, GArray* operations, void* default_value, AP_DataType type, bool want_reply) {
     struct AP_SetServerDataRequest* request = (struct AP_SetServerDataRequest*)malloc(sizeof(struct AP_SetServerDataRequest));
     if (request != NULL) {
-        request->status = status;
+        g_atomic_int_set(&request->status, status);
         request->key = _strdup(key);
         request->operations = operations;
         request->default_value = default_value;
@@ -270,7 +279,7 @@ void AP_SetServerDataRequest_free(struct AP_SetServerDataRequest* request) {
 struct AP_GetServerDataRequest* AP_GetServerDataRequest_new(AP_RequestStatus status, const char* key, void* value, AP_DataType type) {
     struct AP_GetServerDataRequest* request = (struct AP_GetServerDataRequest*)malloc(sizeof(struct AP_GetServerDataRequest));
     if (request != NULL) {
-        request->status = status;
+        g_atomic_int_set(&request->status, status);
         request->key = _strdup(key);
         request->value = value;
         request->type = type;
@@ -397,7 +406,7 @@ bool multiworld = true;
 bool isSSL = true;
 bool ssl_success = false;
 bool data_synced = false;
-bool ap_ready = false;
+gint ap_ready = false;
 int ap_player_id;
 const char* ap_player_name;
 const char* ap_ip;
@@ -477,6 +486,7 @@ json_t* sp_ap_root;
 // PRIV Func Declarations Start
 void AP_Init_Generic();
 bool parse_response(json_t* root);
+static bool parse_response_locked(json_t* root);
 //void APSend(char* req);
 char* getItemName(const char* gamename, uint64_t id);
 char* getLocationName(const char* gamename, uint64_t id);
@@ -518,7 +528,9 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
         }
         psd->message_buffer = NULL;
         psd->is_processing = false;
+        AP_LOCK();
         connected = true;
+        AP_UNLOCK();
         break;
 
     case LWS_CALLBACK_CLIENT_RECEIVE:
@@ -532,70 +544,23 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             return -1;
         }
 
-        size_t remaining = lws_remaining_packet_payload(wsi);
-
-        if (lws_is_first_fragment(wsi)) {
-
-            if (len + remaining > MAX_PAYLOAD_SIZE) {
-                //lwsl_warn("Large message incoming: %zu bytes\n", len + remaining);
-            }
-            psd->message_buffer = g_string_new_len(NULL, len + remaining);
+        if (!psd->is_processing) {
+            psd->message_buffer = g_string_sized_new(len);
             psd->is_processing = true;
         }
 
         if (psd->message_buffer) {
             g_string_append_len(psd->message_buffer, (const gchar*)in, len);
-        }
-
-        // Process when complete
-        if (lws_is_final_fragment(wsi))
-        {
-            if (psd->message_buffer) {
-                char* current_pos = psd->message_buffer->str;
-                char* end_pos = psd->message_buffer->str + psd->message_buffer->len;
-
-                while (current_pos < end_pos) {
-                    json_t* json = json_loads(current_pos, JSON_DISABLE_EOF_CHECK, &jerror);
-
-                    if (!json) {
-                        if (jerror.text != NULL) {
-                            lwsl_warn("JSON parse error: %s at position %zd. Trying to recover.\n", jerror.text, jerror.position);
-                            if (jerror.position > 0 && jerror.position < psd->message_buffer->len) {
-                                current_pos += jerror.position;
-                                while (current_pos < end_pos && isspace(*current_pos)) {
-                                    current_pos++;
-                                }
-                                if (current_pos < end_pos && *current_pos != '[') { // Try finding the next  '['
-                                    while (current_pos < end_pos && *current_pos != '[') {
-                                        current_pos++;
-                                    }
-                                }
-                                if (current_pos >= end_pos) {
-                                    break;
-                                }
-                                continue;
-                            }
-                            else {
-                                lwsl_err("Unrecoverable JSON parse error: %s.\n", jerror.text);
-                                break;
-                            }
-                        }
-                        else {
-                            lwsl_err("Unknown JSON parse error.\n");
-                            break;
-                        }
-                    }
-                    else {
-                        printf("in: %s \n\n\n", current_pos);
-                        parse_response(json);
-                        json_decref(json);
-                        current_pos += jerror.position; // Advance using the error.position
-                        while (current_pos < end_pos && isspace(*current_pos)) {
-                            current_pos++; // Skip whitespace
-                        }
-                    }
-                }
-
+            json_t* json = json_loadb(psd->message_buffer->str, psd->message_buffer->len, 0, &jerror);
+            if (json) {
+                printf("in: %s \n\n\n", psd->message_buffer->str);
+                parse_response(json);
+                json_decref(json);
+                g_string_free(psd->message_buffer, TRUE);
+                psd->message_buffer = NULL;
+                psd->is_processing = false;
+            } else if (json_error_code(&jerror) != json_error_premature_end_of_input) {
+                lwsl_err("JSON parse error: %s at position %d.\n", jerror.text, jerror.position);
                 g_string_free(psd->message_buffer, TRUE);
                 psd->message_buffer = NULL;
                 psd->is_processing = false;
@@ -611,16 +576,16 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
         }
         unsigned char* write_buf = &buf[LWS_PRE];
 
-        while (!g_queue_is_empty(outgoing_queue)) {
-            json_t* json_out = g_queue_peek_head(outgoing_queue);
-            if (!json_out) {
-                continue;
-            }
+        while (true) {
+            AP_LOCK();
+            json_t* json_out = outgoing_queue ? g_queue_pop_head(outgoing_queue) : NULL;
+            AP_UNLOCK();
+            if (!json_out) break;
 
             char* msg_out = json_dumps(json_out, JSON_COMPACT);
             if (!msg_out) {
                 lwsl_err("JSON serialization failed\n");
-                free(msg_out);
+                json_decref(json_out);
                 continue;
             }
 
@@ -628,6 +593,7 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             if (msg_len > WRITE_BUFFER_SIZE) {
                 lwsl_err("Message too large for buffer: %zu bytes\n", msg_len);
                 free(msg_out);
+                json_decref(json_out);
                 continue;
             }
 
@@ -636,23 +602,26 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             printf("out: %s \n\n\n",msg_out);
             free(msg_out);
             json_decref(json_out);
-            g_queue_pop_head(outgoing_queue);
             if (written < msg_len) {
                 lwsl_err("Write failed: %d/%zu\n", written, msg_len);
                 continue;
             }
-            // TODO: Is this necessary?
-            // Check if we need more write events
-            if (!g_queue_is_empty(outgoing_queue)) {
-                lws_callback_on_writable(wsi);
-            }
         }
         free(buf);
         break;
+    case LWS_CALLBACK_EVENT_WAIT_CANCELLED:
+        AP_LOCK();
+        bool has_outgoing = web_socket && outgoing_queue && !g_queue_is_empty(outgoing_queue);
+        struct lws* writable_socket = web_socket;
+        AP_UNLOCK();
+        if (has_outgoing) lws_callback_on_writable(writable_socket);
+        break;
     case LWS_CALLBACK_CLOSED:
+        AP_LOCK();
         auth = false;
         connected = false;
         web_socket = NULL;
+        AP_UNLOCK();
         break;
 
     case LWS_CALLBACK_CLIENT_CLOSED:
@@ -660,9 +629,11 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             g_string_free(psd->message_buffer, TRUE);
             psd->message_buffer = NULL;
         }
+        AP_LOCK();
         auth = false;
         connected = false;
         web_socket = NULL;
+        AP_UNLOCK();
         break;
 
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
@@ -670,10 +641,13 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
             g_string_free(psd->message_buffer, TRUE);
             psd->message_buffer = NULL;
         }
+        AP_LOCK();
         auth = false;
         connected = false;
         web_socket = NULL;
+        g_atomic_int_set(&connection_attempt_failed, TRUE);
         isSSL = !isSSL;
+        AP_UNLOCK();
         break;
 
     default:
@@ -745,12 +719,20 @@ void AP_WebsocketSulCleanup()
 // Main service loop - required for SUL to work
 void service_loop()
 {
-    while (context) {
+    AP_LOCK();
+    if (!context || g_atomic_int_get(&shutting_down)) {
+        AP_UNLOCK();
+        return;
+    }
+    g_atomic_int_set(&service_loop_running, TRUE);
+    AP_UNLOCK();
+    while (!g_atomic_int_get(&shutting_down)) {
         // Service any pending events (including SUL callbacks)
         AP_WebService();
         // Small sleep to prevent CPU spinning
         Sleep(1);
     }
+    g_atomic_int_set(&service_loop_running, FALSE);
 }
 
 struct send_data_sul {
@@ -791,19 +773,27 @@ void start_periodic_send(struct lws* wsi, const char* data, size_t len)
 }
 
 void AP_SetClientVersion(struct AP_NetworkVersion* version) {
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down)) { AP_UNLOCK(); return; }
     if (!client_version) { client_version = AP_NetworkVersion_new(0, 2, 6); }
     client_version->major = version->major;
     client_version->minor = version->minor;
     client_version->build = version->build;
+    AP_UNLOCK();
 }
 
 void AP_SendWeb()
 {
-    if (web_socket) lws_callback_on_writable(web_socket);
+    AP_LOCK();
+    if (!g_atomic_int_get(&shutting_down) && context)
+        lws_cancel_service(context);
+    AP_UNLOCK();
 }
 
 //TODO: Implement SP
 void AP_SendItem(uint64_t idx) {
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down)) { AP_UNLOCK(); return; }
     if (multiworld) {
         json_t* req_t = json_object();
         json_t* req_array = json_array();
@@ -839,9 +829,12 @@ void AP_SendItem(uint64_t idx) {
         fake_msg[0]["checked_locations"][0] = idx;
         parse_response(writer.write(fake_msg), req);*/
     }
+    AP_UNLOCK();
 }
 
 void AP_SendMsg(char* msg_in) {
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down)) { AP_UNLOCK(); return; }
     if (multiworld) {
         json_t* req_t = json_object();
         json_t* req_array = json_array();
@@ -854,10 +847,13 @@ void AP_SendMsg(char* msg_in) {
     else {
         // TODO: Implement SP
     }
+    AP_UNLOCK();
 }
 
 //TODO: Implement SP
 void AP_SendLocationScouts(GArray* locations, int create_as_hint) {
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down)) { AP_UNLOCK(); return; }
     if (multiworld) {
         json_t* req_t = json_object();
         json_t* req_array = json_array();
@@ -888,9 +884,12 @@ void AP_SendLocationScouts(GArray* locations, int create_as_hint) {
             fake_msg[0]["locations"].append(netitem);
         }*/
     }
+    AP_UNLOCK();
 }
 
 void AP_SendLocationScout(uint64_t location, int create_as_hint) {
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down)) { AP_UNLOCK(); return; }
     if (multiworld) {
         json_t* req_t = json_object();
         json_t* req_array = json_array();
@@ -917,10 +916,12 @@ void AP_SendLocationScout(uint64_t location, int create_as_hint) {
             fake_msg[0]["locations"].append(netitem);
         }*/
     }
+    AP_UNLOCK();
 }
 
 void AP_StoryComplete() {
-    if (!multiworld) return;
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down) || !multiworld) { AP_UNLOCK(); return; }
     json_t* req_t = json_object();
     json_t* req_array = json_array();
     json_object_set_new(req_t, "cmd", json_string("StatusUpdate"));
@@ -928,12 +929,15 @@ void AP_StoryComplete() {
     json_array_append_new(req_array, req_t);
     g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
     AP_SendWeb();
+    AP_UNLOCK();
 }
 
 void AP_DeathLinkSend() {
-    if (!enable_deathlink || !multiworld) return;
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down) || !enable_deathlink || !multiworld) { AP_UNLOCK(); return; }
     if (cur_deathlink_amnesty > 0) {
         cur_deathlink_amnesty--;
+        AP_UNLOCK();
         return;
     }
     cur_deathlink_amnesty = deathlink_amnesty;
@@ -953,6 +957,7 @@ void AP_DeathLinkSend() {
     json_array_append_new(req_array, req_t);
     g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
     AP_SendWeb();
+    AP_UNLOCK();
 }
 
 //TODO: Implement SP
@@ -969,10 +974,24 @@ void AP_Init_SP(const char* filename) {
 }
 
 bool AP_IsInit() {
-    return init;
+    bool result;
+    AP_LOCK();
+    result = !g_atomic_int_get(&shutting_down) && init;
+    AP_UNLOCK();
+    return result;
 }
 
 void AP_WebService() {
+    struct lws* active_context_socket;
+
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down) || !context) {
+        AP_UNLOCK();
+        return;
+    }
+    g_atomic_int_inc(&active_web_services);
+    AP_UNLOCK();
+
     /* Connect if we are not connected to the server. */
     if (!web_socket)
     {
@@ -987,19 +1006,26 @@ void AP_WebService() {
         ccinfo.protocol = protocols[PROTOCOL_AP].name;
         if (isSSL) ccinfo.ssl_connection = LCCSCF_USE_SSL | LCCSCF_ALLOW_SELFSIGNED | LCCSCF_SKIP_SERVER_CERT_HOSTNAME_CHECK;
         else ccinfo.ssl_connection = 0;
-        web_socket = lws_client_connect_via_info(&ccinfo);
+        g_atomic_int_set(&connection_attempt_failed, FALSE);
+        active_context_socket = lws_client_connect_via_info(&ccinfo);
+        AP_LOCK();
+        if (!g_atomic_int_get(&connection_attempt_failed)) web_socket = active_context_socket;
+        AP_UNLOCK();
         lws_service(context, 0);
     }
     else if (web_socket)
     {
         lws_service(context, 0);
     }
+    g_atomic_int_add(&active_web_services, -1);
 }
 
 ////TODO: Implement SP, currently has no use in MP
 void AP_Start() {
+    g_atomic_int_set(&ap_ready, true);
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down)) { AP_UNLOCK(); return; }
     init = true;
-    ap_ready = true;
     if (multiworld) {
         // Websocket is handled by AP_Init
         //webSocket.start();
@@ -1049,16 +1075,20 @@ void AP_Start() {
         }
         parse_response(writer.write(fake_msg), req);*/
     }
+    AP_UNLOCK();
 }
 
 void AP_Init(const char* ip, int port, const char* game, const char* player_name, const char* passwd)
 {
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down)) { AP_UNLOCK(); return; }
    // lws_set_log_level(LLL_DEBUG | LLL_INFO | LLL_NOTICE | LLL_WARN | LLL_ERR, NULL);
     multiworld = true;
     if (!slotdata_strings) { slotdata_strings = g_array_new(true, true, sizeof(GString*)); }
     if (!sp_save_root) { sp_save_root = json_object(); }
     if (!messageQueue) { messageQueue = g_queue_new(); }
     if (!outgoing_queue) { outgoing_queue = g_queue_new(); }
+    g_atomic_int_set(&connection_attempt_failed, FALSE);
 
     g_random_set_seed((guint32)time(NULL));
     seeded_rand = g_rand_new();
@@ -1073,6 +1103,7 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     ap_game = game;
     ap_player_name = player_name;
     ap_passwd = passwd;
+    isSSL = strcmp(ip, "localhost") && strcmp(ip, "127.0.0.1") && strcmp(ip, "::1");
 
     //Connect to server
 
@@ -1084,7 +1115,7 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     lws_info.protocols = protocols;
     lws_info.gid = -1;
     lws_info.uid = -1;
-    lws_info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+    lws_info.options = isSSL ? LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT : 0;
     lws_info.extensions = extensions;
 
     context = lws_create_context(&lws_info);
@@ -1094,7 +1125,7 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     g_array_append_val(map_players, archipelago);
     AP_Init_Generic();
 
-    
+    AP_UNLOCK();
 }
 
 void AP_Init_Generic() {
@@ -1107,6 +1138,19 @@ void AP_Init_Generic() {
 }
 
 bool parse_response(json_t* root)
+{
+    bool result;
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down)) {
+        AP_UNLOCK();
+        return false;
+    }
+    result = parse_response_locked(root);
+    AP_UNLOCK();
+    return result;
+}
+
+static bool parse_response_locked(json_t* root)
 {
     request = json_array();
     // Received a valid json
@@ -1220,10 +1264,12 @@ bool parse_response(json_t* root)
         else if (cmd && !strcmp(cmd, "Connected"))
         {
             // Waiting for call to AP_Start()
-            while (!ap_ready) {   Sleep(100); }
+            while (!g_atomic_int_get(&ap_ready)) { Sleep(100); }
             if ((temp_obj = json_object_get(obj, "slot"))) { ap_player_id = (int)json_integer_value(temp_obj); }
             // Avoid inconsistency if we disconnected before
+            AP_UNLOCK();
             (*resetItemValues)();
+            AP_LOCK();
             auth = true;
             ssl_success = auth && isSSL;
             refused = false;
@@ -1235,7 +1281,9 @@ bool parse_response(json_t* root)
                 json_array_foreach(temp_obj, j, v)
                 {
                     uint64_t loc_id = json_integer_value(v);
+                    AP_UNLOCK();
                     (*checklocfunc)(loc_id);
+                    AP_LOCK();
                 }
             }
             if ((temp_obj = json_object_get(obj, "players")))
@@ -1307,7 +1355,9 @@ bool parse_response(json_t* root)
                         if ((callback_func_ptr = (void*)g_hash_table_lookup(map_slotdata_callback_raw, callback_key)) != NULL)
                         {
                             // JSON Object callback, no type checking required
+                            AP_UNLOCK();
                             ((void(*)(json_t*))callback_func_ptr)(slot_data_obj);
+                            AP_LOCK();
                         }
                         
                         if ((callback_func_ptr = (void*)g_hash_table_lookup(map_slotdata_callback_int, callback_key)) != NULL)
@@ -1317,8 +1367,9 @@ bool parse_response(json_t* root)
                             {
                                 //Only return data if type is int
                                 uint64_t json_val = (uint64_t)json_integer_value(slot_data_obj);
-                                uint64_t* read_val = &json_val;
-                                ((void(*)(uint64_t*))callback_func_ptr)(read_val);
+								AP_UNLOCK();
+								((void(*)(uint64_t))callback_func_ptr)(json_val);
+								AP_LOCK();
                             }
                             else { printf("AP_RegisterSlotDataIntCallback key %s has wrong type: %s", callback_key->str, jtype_to_string(slot_data_obj)); }
                         }
@@ -1341,7 +1392,9 @@ bool parse_response(json_t* root)
                                     }
                                     else { printf("AP_RegisterSlotDataIntArrayCallback array element in %s has wrong type: %s", callback_key->str, jtype_to_string(val)); }
                                 }
+                                AP_UNLOCK();
                                 ((void(*)(GArray*))callback_func_ptr)(j_array);
+                                AP_LOCK();
                             }
                             else { printf("AP_RegisterSlotDataIntArrayCallback key element %s has wrong type: %s", callback_key->str, jtype_to_string(slot_data_obj)); }
                         }
@@ -1462,7 +1515,7 @@ bool parse_response(json_t* root)
                     struct AP_GetServerDataRequest* target = g_hash_table_lookup(map_server_data, gs_key);
                     if (target) 
                     {
-                        if (json_is_null(v)) { target->value = NULL; target->status = Done; g_hash_table_remove(map_server_data, gs_key); break; }
+                        if (json_is_null(v)) { target->value = NULL; g_atomic_int_set(&target->status, Done); g_hash_table_remove(map_server_data, gs_key); break; }
                         switch (target->type)
                         {
                         case Int:
@@ -1472,10 +1525,10 @@ bool parse_response(json_t* root)
                             *((double*)target->value) = json_real_value(v);
                             break;
                         case Raw:
-                            (json_t*)target->value = json_deep_copy(v);
+                            *((json_t**)target->value) = json_deep_copy(v);
                             break;
                         }
-                        target->status = Done;
+                        g_atomic_int_set(&target->status, Done);
                         g_hash_table_remove(map_server_data, gs_key);
                     }
                 }
@@ -1518,7 +1571,9 @@ bool parse_response(json_t* root)
                             setreply = AP_SetReply_new(gs_key->str, &raw_orig_val, &raw_val);
                             break;
                     }
+                    AP_UNLOCK();
                     (*setreplyfunc)(setreply);
+                    AP_LOCK();
                 }
             }
         }//end of setreply
@@ -1644,7 +1699,9 @@ bool parse_response(json_t* root)
                 struct AP_NetworkItem* item = AP_NetworkItem_new(item_id, loc_id, player->slot, flags, getItemName(ap_game, item_id), getLocationName(ap_game, loc_id), player->alias);
                 g_array_append_val(locations, item);
             }
+            AP_UNLOCK();
             locinfofunc(locations);
+            AP_LOCK();
         }//end of locationinfo
         else if (cmd && !strcmp(cmd, "ReceivedItems"))
         {
@@ -1662,7 +1719,9 @@ bool parse_response(json_t* root)
                 notify = (item_idx == 0 && last_item_idx <= j && multiworld) || item_idx != 0;
                 json_t* player_obj = json_object_get(v, "player");
                 struct AP_NetworkPlayer* sender = getPlayer(0, (int)json_integer_value(player_obj));
+                AP_UNLOCK();
                 (*getitemfunc)(item_id, sender->slot, notify);
+                AP_LOCK();
                 if (queueitemrecvmsg && notify) {
                     char* item_name = getItemName(ap_game, item_id);
                     GArray* messageparts_array = g_array_new(true, true, sizeof(struct AP_MessagePart*));
@@ -1703,7 +1762,9 @@ bool parse_response(json_t* root)
             json_array_foreach(checked_locs_obj, j, v)
             {
                 uint64_t loc_id = json_integer_value(v);
+                AP_UNLOCK();
                 (*checklocfunc)(loc_id);
+                AP_LOCK();
             }
             json_t* players_obj = json_object_get(obj, "players");
             json_array_foreach(players_obj, j, v)
@@ -1741,7 +1802,9 @@ bool parse_response(json_t* root)
                     if (!strcmp(source_name->str, ap_player_name)) { break; }
                     deathlinkstat = true;
                     if (recvdeath != NULL) {
+                        AP_UNLOCK();
                         (*recvdeath)(source_name->str);
+                        AP_LOCK();
                     }
                     break;
                 }
@@ -1752,7 +1815,35 @@ return false;
 }
 
 void AP_Shutdown() {
-    lws_context_destroy(context);
+    struct lws_context* context_to_destroy;
+
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down)) { AP_UNLOCK(); return; }
+    g_atomic_int_set(&shutting_down, TRUE);
+    init = false;
+    context_to_destroy = context;
+    if (map_server_data) {
+        GHashTableIter pending_iter;
+        gpointer key;
+        gpointer value;
+        g_hash_table_iter_init(&pending_iter, map_server_data);
+        while (g_hash_table_iter_next(&pending_iter, &key, &value))
+            g_atomic_int_set(&((struct AP_GetServerDataRequest*)value)->status, Error);
+    }
+    AP_UNLOCK();
+
+    if (context_to_destroy) lws_cancel_service(context_to_destroy);
+    while (g_atomic_int_get(&service_loop_running)) Sleep(1);
+    while (g_atomic_int_get(&active_web_services)) Sleep(1);
+
+    AP_LOCK();
+    context_to_destroy = context;
+    context = NULL;
+    web_socket = NULL;
+    AP_UNLOCK();
+    if (context_to_destroy) lws_context_destroy(context_to_destroy);
+
+    AP_LOCK();
     // Reset all states
     init = false;
     auth = false;
@@ -1761,6 +1852,7 @@ void AP_Shutdown() {
     data_synced = false;
     isSSL = true;
     ssl_success = false;
+    g_atomic_int_set(&connection_attempt_failed, FALSE);
     ap_player_id = 0;
     ap_player_name="";
     ap_ip="";
@@ -1780,7 +1872,7 @@ void AP_Shutdown() {
     g_array_free(map_players, true);
     //TODO: free the individual structs in the arrays and hash_tables as well
     map_players = g_array_new(true, true, sizeof(struct AP_NetworkPlayer*));
-    g_hash_table_destroy(map_game_to_data);
+    if (map_game_to_data) g_hash_table_destroy(map_game_to_data);
     map_game_to_data = g_hash_table_new(g_string_hash, g_string_equal);
     resetItemValues = NULL;
     getitemfunc = NULL;
@@ -1788,187 +1880,262 @@ void AP_Shutdown() {
     locinfofunc = NULL;
     recvdeath = NULL;
     setreplyfunc = NULL;
-    g_hash_table_destroy(map_serverdata_typemanage);
+    if (map_serverdata_typemanage) g_hash_table_destroy(map_serverdata_typemanage);
+    map_serverdata_typemanage = NULL;
     last_item_idx = 0;
     sp_save_path="";
-    g_hash_table_destroy(map_server_data);
+    if (map_server_data) g_hash_table_destroy(map_server_data);
     map_server_data = g_hash_table_new(g_string_hash, g_string_equal);
-    g_hash_table_destroy(map_slotdata_callback_int);
+    if (map_slotdata_callback_int) g_hash_table_destroy(map_slotdata_callback_int);
     map_slotdata_callback_int = g_hash_table_new(g_string_hash, g_string_equal);
-    g_hash_table_destroy(map_slotdata_callback_raw);
+    if (map_slotdata_callback_raw) g_hash_table_destroy(map_slotdata_callback_raw);
     map_slotdata_callback_raw = g_hash_table_new(g_string_hash, g_string_equal);
-    g_hash_table_destroy(map_slotdata_callback_intarray);
+    if (map_slotdata_callback_intarray) g_hash_table_destroy(map_slotdata_callback_intarray);
     map_slotdata_callback_intarray = g_hash_table_new(g_string_hash, g_string_equal);
     g_array_free(slotdata_strings, true);
     slotdata_strings = g_array_new(true, true, sizeof(char*));
+    while (outgoing_queue && !g_queue_is_empty(outgoing_queue))
+        json_decref(g_queue_pop_head(outgoing_queue));
+    g_atomic_int_set(&ap_ready, FALSE);
+    g_atomic_int_set(&shutting_down, FALSE);
+    AP_UNLOCK();
 }
 
 
 void AP_EnableQueueItemRecvMsgs(bool b) {
+    AP_LOCK();
     queueitemrecvmsg = b;
+    AP_UNLOCK();
 }
 
 void AP_SetItemClearCallback(void (*f_itemclr)()) {
+    AP_LOCK();
     resetItemValues = f_itemclr;
+    AP_UNLOCK();
 }
 
 void AP_SetItemRecvCallback(void (*f_itemrecv)(uint64_t, int, bool)) {
+    AP_LOCK();
     getitemfunc = f_itemrecv;
+    AP_UNLOCK();
 }
 
 void AP_SetLocationCheckedCallback(void (*f_loccheckrecv)(uint64_t)) {
+    AP_LOCK();
     checklocfunc = f_loccheckrecv;
+    AP_UNLOCK();
 }
 
 void AP_SetLocationInfoCallback(void (*f_locinfrecv)(GArray*)) {
+    AP_LOCK();
     locinfofunc = f_locinfrecv;
+    AP_UNLOCK();
 }
 
 void AP_SetDeathLinkRecvCallback(void (*f_deathrecv)()) {
+    AP_LOCK();
     recvdeath = f_deathrecv;
+    AP_UNLOCK();
 }
 
 void AP_RegisterSlotDataIntCallback(char* key, void (*f_slotdata)(uint64_t)) {
+    AP_LOCK();
     GString* gs_key = g_string_new(key);
     g_hash_table_insert(map_slotdata_callback_int, gs_key, f_slotdata);
     //g_array_append_val(slotdata_strings, gs_key);
     g_array_append_unique_gstring(slotdata_strings, gs_key);
+    AP_UNLOCK();
 }
 
 // Returns the slot_data element as a string
 void AP_RegisterSlotDataRawCallback(char* key, void (*f_slotdata)(json_t*)) {
+    AP_LOCK();
     GString* gs_key = g_string_new(key);
     g_hash_table_insert(map_slotdata_callback_raw, gs_key , f_slotdata);
     // g_array_append_val(slotdata_strings, gs_key);
     g_array_append_unique_gstring(slotdata_strings, gs_key);
+    AP_UNLOCK();
 }
 
 // Returns the slot_data element as a GArray filled with integers
 void AP_RegisterSlotDataIntArrayCallback(char* key, void (*f_slotdata)(GArray*)) {
+    AP_LOCK();
     GString* gs_key = g_string_new(key);
     g_hash_table_insert(map_slotdata_callback_intarray, gs_key, f_slotdata);
     //g_array_append_val(slotdata_strings, gs_key);
     g_array_append_unique_gstring(slotdata_strings, gs_key);
+    AP_UNLOCK();
 }
 
 void AP_SetDeathLinkSupported(bool supdeathlink) {
+    AP_LOCK();
     deathlinksupported = supdeathlink;
+    AP_UNLOCK();
 }
 
 bool AP_DeathLinkPending() {
-    return deathlinkstat;
+    bool result;
+    AP_LOCK();
+    result = deathlinkstat;
+    AP_UNLOCK();
+    return result;
 }
 
 void AP_DeathLinkClear() {
+    AP_LOCK();
     deathlinkstat = false;
+    AP_UNLOCK();
 }
 
 bool AP_IsMessagePending() {
-    if (messageQueue) return messageQueue->length > 0;
-    else return false;
+    bool result;
+    AP_LOCK();
+    result = messageQueue && messageQueue->length > 0;
+    AP_UNLOCK();
+    return result;
 }
 
 void* AP_GetLatestMessage() {
-    return g_queue_peek_head(messageQueue);
+    void* result;
+    AP_LOCK();
+    result = messageQueue ? g_queue_peek_head(messageQueue) : NULL;
+    AP_UNLOCK();
+    return result;
 }
 
 void AP_ClearLatestMessage() {
-    if (AP_IsMessagePending()) {
+    AP_LOCK();
+    if (messageQueue && !g_queue_is_empty(messageQueue)) {
         g_queue_pop_head(messageQueue);
     }
+    AP_UNLOCK();
 }
 
 int AP_GetRoomInfo(struct AP_RoomInfo* client_roominfo) {
-    if (!auth) return 0;
+    AP_LOCK();
+    if (!auth) { AP_UNLOCK(); return 0; }
     *client_roominfo = lib_room_info;
+    AP_UNLOCK();
     return 1;
 }
 
 AP_ConnectionStatus AP_GetConnectionStatus() {
+    AP_ConnectionStatus result;
+    AP_LOCK();
     if (refused)
     {
-        return ConnectionRefused;
+        result = ConnectionRefused;
     }
     else if (connected) 
     {
         if (auth) 
         {
-            return Authenticated;
+            result = Authenticated;
         }
         else 
         {
-            return Connected;
+            result = Connected;
         }
     }
     else 
     {
-        return Disconnected;
+        result = Disconnected;
     }
+    AP_UNLOCK();
+    return result;
 }
 
 AP_DataPackageSyncStatus AP_GetDataPackageStatus() {
+    AP_DataPackageSyncStatus result;
+    AP_LOCK();
     if (!auth) {
-        return NotChecked;
+        result = NotChecked;
     }
-    if (data_synced) {
-        return Synced;
+    else if (data_synced) {
+        result = Synced;
     }
     else {
-        return SyncPending;
+        result = SyncPending;
     }
+    AP_UNLOCK();
+    return result;
 }
 
 uint64_t AP_GetUUID() {
-    return ap_uuid;
+    uint64_t result;
+    AP_LOCK();
+    result = ap_uuid;
+    AP_UNLOCK();
+    return result;
 }
 
 int AP_GetPlayerID() {
-    return ap_player_id;
+    int result;
+    AP_LOCK();
+    result = ap_player_id;
+    AP_UNLOCK();
+    return result;
 }
 
 char* AP_GetLocationName(uint64_t id) {
-    return getLocationName(ap_game, id);
+    char* result;
+    AP_LOCK();
+    result = getLocationName(ap_game, id);
+    AP_UNLOCK();
+    return result;
 }
 
 char* AP_GetItemName(uint64_t id) {
-    return getItemName(ap_game, id);
+    char* result;
+    AP_LOCK();
+    result = getItemName(ap_game, id);
+    AP_UNLOCK();
+    return result;
 }
 
 char* AP_GetLocalHintDataPrefix() {
+    AP_LOCK();
     char* buffer = (char*)malloc(32);
     if (buffer == NULL) {
         fprintf(stderr, "Memory allocation failed!\n");
+        AP_UNLOCK();
         return NULL;
     }
     struct AP_NetworkPlayer* player_data = g_array_index(map_players, struct AP_NetworkPlayer*, ap_player_id);
     sprintf(buffer, "_read_hints_%d_%d", player_data->team, player_data->slot);
+    AP_UNLOCK();
     return buffer;
 }
 
 json_t* AP_GetLocalHints() {
+    AP_LOCK();
     char* buffer = (char*)malloc(32);
     if (buffer == NULL) {
         fprintf(stderr, "Memory allocation failed!\n");
+        AP_UNLOCK();
         return NULL;
     }
     struct AP_NetworkPlayer* player_data = g_array_index(map_players, struct AP_NetworkPlayer*, ap_player_id);
     sprintf(buffer, "_read_hints_%d_%d", player_data->team, player_data->slot);
+    AP_UNLOCK();
 
-    struct AP_GetServerDataRequest* hint_serverdata_request = AP_GetServerDataRequest_new(Pending, buffer, &last_item_idx, Raw);
+    json_t* hints = NULL;
+    struct AP_GetServerDataRequest* hint_serverdata_request = AP_GetServerDataRequest_new(Pending, buffer, &hints, Raw);
     AP_GetServerData(hint_serverdata_request);
-    while (hint_serverdata_request->status != Done) {
-        //printf("Waiting");
+    while (g_atomic_int_get(&hint_serverdata_request->status) == Pending) {
+        Sleep(1);
     }
-    json_t* hint_obj = hint_serverdata_request->value;
 
     free(buffer);
-
-    return hint_serverdata_request->value;
+    AP_GetServerDataRequest_free(hint_serverdata_request);
+    return hints;
 }
 
 void AP_SetServerData(struct AP_SetServerDataRequest* sd_request) {
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down)) { AP_UNLOCK(); return; }
     if (!map_serverdata_typemanage) { map_serverdata_typemanage = g_hash_table_new(g_string_hash, g_string_equal); }
-    sd_request->status = Pending;
+    g_atomic_int_set(&sd_request->status, Pending);
     json_t* req_t = json_object();
     json_t* req_array = json_array();
     json_t* op_array = json_array();
@@ -2025,15 +2192,20 @@ void AP_SetServerData(struct AP_SetServerDataRequest* sd_request) {
         //TODO: SP test
         localSetServerData(req_t);
     }
-    sd_request->status = Done;
+    g_atomic_int_set(&sd_request->status, Done);
+    AP_UNLOCK();
 }
 
 void AP_RegisterSetReplyCallback(void (*f_setreply)(struct AP_SetReply* reply)) {
+    AP_LOCK();
     setreplyfunc = f_setreply;
+    AP_UNLOCK();
 }
 
 //TODO: Test SetNotify
 void AP_SetNotify_Keylist(GHashTable* keylist) {
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down)) { AP_UNLOCK(); return; }
     json_t* req_t = json_object();
     json_t* req_array = json_array();
     json_t* req_key_array = json_array();
@@ -2052,21 +2224,34 @@ void AP_SetNotify_Keylist(GHashTable* keylist) {
     json_array_append_new(req_array, req_t);
     g_queue_push_tail(outgoing_queue, json_deep_copy(req_array));
     AP_SendWeb();
+    AP_UNLOCK();
 }
 
 //TODO: Test SetNotify
 void AP_SetNotify_Type(char* key, AP_DataType type) {
+    AP_LOCK();
     GHashTable* keylist = g_hash_table_new(g_string_hash, g_string_equal);
     GString* gs_key = g_string_new(key);
     g_hash_table_insert(keylist, gs_key, &type);
     AP_SetNotify_Keylist(keylist);
+    AP_UNLOCK();
 }
 
 void AP_GetServerData(struct AP_GetServerDataRequest* sd_request) {
+    AP_LOCK();
+    if (g_atomic_int_get(&shutting_down)) {
+        g_atomic_int_set(&sd_request->status, Error);
+        AP_UNLOCK();
+        return;
+    }
     if (!map_server_data) { map_server_data = g_hash_table_new(g_string_hash, g_string_equal); }
-    sd_request->status = Pending;
+    g_atomic_int_set(&sd_request->status, Pending);
     GString* gs_key = g_string_new(sd_request->key);
-    if (g_hash_table_lookup(map_server_data, gs_key) != NULL) { printf("Returning without action.\n"); return; }
+    if (g_hash_table_lookup(map_server_data, gs_key) != NULL) {
+        printf("Returning without action.\n");
+        AP_UNLOCK();
+        return;
+    }
     g_hash_table_insert(map_server_data, gs_key, sd_request);
 
     if (multiworld)
@@ -2102,14 +2287,17 @@ void AP_GetServerData(struct AP_GetServerDataRequest* sd_request) {
         json_array_append_new(fake_req_array, fake_req_t);
         parse_response(fake_req_array);
     }
+    AP_UNLOCK();
 }
 
 GString* AP_GetPrivateServerDataPrefix() {
+    AP_LOCK();
     GString* return_string = g_string_new("APCc");
     g_string_append(return_string, lib_room_info.seed_name);
     g_string_append(return_string, "APCc");
     g_string_append_printf(return_string, "%i", ap_player_id);
     g_string_append(return_string, "APCc");
+    AP_UNLOCK();
     return return_string;
 }
 
