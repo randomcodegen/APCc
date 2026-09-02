@@ -163,6 +163,7 @@ typedef enum {
 struct AP_MessagePart {
     char* text;
     AP_MessagePartType type;
+    int flags;
 };
 
 struct AP_Message {

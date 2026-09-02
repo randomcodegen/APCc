@@ -116,6 +116,7 @@ struct AP_MessagePart* AP_MessagePart_new(const char* text, AP_MessagePartType t
     if (newPart != NULL) {
         newPart->text = _strdup(text);
         newPart->type = type;
+        newPart->flags = 0;
     }
     return newPart;
 };
@@ -1532,6 +1533,7 @@ bool parse_response(json_t* root)
                 {
                     json_t* item_obj = json_object_get(obj, "item");
                     uint64_t item_id = json_integer_value(json_object_get(item_obj, "item"));
+                    int flags = (int)json_integer_value(json_object_get(item_obj, "flags"));
                     json_t* item_recvplayer_obj = json_object_get(item_obj, "player");
                     struct AP_NetworkPlayer* recv_player = getPlayer(0, (int)json_integer_value(json_object_get(obj, "receiving")));
                     struct AP_NetworkPlayer* recv_item_player = getPlayer(0, (int)json_integer_value(item_recvplayer_obj));
@@ -1539,6 +1541,7 @@ bool parse_response(json_t* root)
                     char* item_name = getItemName(recv_player->game, item_id);
                     GArray* messageparts_array = g_array_new(true, true, sizeof(struct AP_MessagePart*));
                     struct AP_MessagePart* msg_p = AP_MessagePart_new(item_name, AP_ItemText);
+                    msg_p->flags = flags;
                     g_array_append_val(messageparts_array, msg_p);
                     msg_p = AP_MessagePart_new(" was sent to ", AP_NormalText);
                     g_array_append_val(messageparts_array, msg_p);
@@ -1553,6 +1556,7 @@ bool parse_response(json_t* root)
                     json_t* item_obj = json_object_get(obj, "item");
                     json_t* item_recvplayer_obj = json_object_get(item_obj, "player");
                     uint64_t item_id = json_integer_value(json_object_get(item_obj, "item"));
+                    int flags = (int)json_integer_value(json_object_get(item_obj, "flags"));
                     uint64_t loc_id = json_integer_value(json_object_get(item_obj, "location"));
                     json_t* found_obj = json_object_get(obj, "found");
                     struct AP_NetworkPlayer* send_player = getPlayer(0, (int)json_integer_value(item_recvplayer_obj));
@@ -1564,6 +1568,7 @@ bool parse_response(json_t* root)
                     struct AP_MessagePart* msg_p = AP_MessagePart_new("Item ", AP_NormalText);
                     g_array_append_val(messageparts_array, msg_p);
                     msg_p = AP_MessagePart_new(item_name, AP_ItemText);
+                    msg_p->flags = flags;
                     g_array_append_val(messageparts_array, msg_p);
                     msg_p = AP_MessagePart_new(" from ", AP_NormalText);
                     g_array_append_val(messageparts_array, msg_p);
@@ -1653,6 +1658,7 @@ bool parse_response(json_t* root)
             {
                 json_t* item_obj = json_object_get(v, "item");
                 uint64_t item_id = json_integer_value(item_obj);
+                int flags = (int)json_integer_value(json_object_get(v, "flags"));
                 notify = (item_idx == 0 && last_item_idx <= j && multiworld) || item_idx != 0;
                 json_t* player_obj = json_object_get(v, "player");
                 struct AP_NetworkPlayer* sender = getPlayer(0, (int)json_integer_value(player_obj));
@@ -1663,6 +1669,7 @@ bool parse_response(json_t* root)
                     struct AP_MessagePart* msg_p = AP_MessagePart_new("Received ", AP_NormalText);
                     g_array_append_val(messageparts_array, msg_p);
                     msg_p = AP_MessagePart_new(item_name, AP_ItemText);
+                    msg_p->flags = flags;
                     g_array_append_val(messageparts_array, msg_p);
                     msg_p = AP_MessagePart_new(" from ", AP_NormalText);
                     g_array_append_val(messageparts_array, msg_p);
