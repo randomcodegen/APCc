@@ -503,6 +503,17 @@ struct AP_NetworkPlayer* getPlayer(int team, int slot);
 void localSetServerData(json_t* req);
 GArray* messageParts = NULL; 
 char* messagePartsToPlainText(GArray* messageParts);
+
+static void appendLocationParts(GArray* parts, const char* game, json_t* location) {
+    struct AP_MessagePart* part;
+    if (!json_is_integer(location)) return;
+    part = AP_MessagePart_new(" (", AP_NormalText);
+    g_array_append_val(parts, part);
+    part = AP_MessagePart_new(getLocationName(game, (uint64_t)json_integer_value(location)), AP_LocationText);
+    g_array_append_val(parts, part);
+    part = AP_MessagePart_new(")", AP_NormalText);
+    g_array_append_val(parts, part);
+}
 // PRIV Func Declarations End
 
 // websocket
@@ -542,7 +553,7 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
 
     case LWS_CALLBACK_CLIENT_RECEIVE:
         recv_count++;
-        if (!in || len == 0) {
+        if (!in && len != 0) {
             lwsl_warn("Empty receive buffer\n");
             return 0;
         }
@@ -557,21 +568,21 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
         }
 
         if (psd->message_buffer) {
-            g_string_append_len(psd->message_buffer, (const gchar*)in, len);
+            if (len) g_string_append_len(psd->message_buffer, (const gchar*)in, len);
+            // JSON tokens may span receive callbacks; parse only complete messages.
+            if (!lws_is_final_fragment(wsi) || lws_remaining_packet_payload(wsi))
+                break;
             json_t* json = json_loadb(psd->message_buffer->str, psd->message_buffer->len, 0, &jerror);
             if (json) {
                 printf("in: %s \n\n\n", psd->message_buffer->str);
                 parse_response(json);
                 json_decref(json);
-                g_string_free(psd->message_buffer, TRUE);
-                psd->message_buffer = NULL;
-                psd->is_processing = false;
-            } else if (json_error_code(&jerror) != json_error_premature_end_of_input) {
+            } else {
                 lwsl_err("JSON parse error: %s at position %d.\n", jerror.text, jerror.position);
-                g_string_free(psd->message_buffer, TRUE);
-                psd->message_buffer = NULL;
-                psd->is_processing = false;
             }
+            g_string_free(psd->message_buffer, TRUE);
+            psd->message_buffer = NULL;
+            psd->is_processing = false;
         }
         break;
 
@@ -1609,6 +1620,7 @@ static bool parse_response_locked(json_t* root)
                     g_array_append_val(messageparts_array, msg_p);
                     msg_p = AP_MessagePart_new(recv_player->alias, AP_PlayerText);
                     g_array_append_val(messageparts_array, msg_p);
+                    appendLocationParts(messageparts_array, recv_item_player->game, json_object_get(item_obj, "location"));
                     struct AP_ItemSendMessage* msg = AP_ItemSendMessage_new(item_name, recv_player->alias, ItemSend, messagePartsToPlainText(messageparts_array), messageparts_array);
                     g_queue_push_tail(messageQueue, msg);
                 }
@@ -1741,6 +1753,7 @@ static bool parse_response_locked(json_t* root)
                     g_array_append_val(messageparts_array, msg_p);
                     msg_p = AP_MessagePart_new(sender->alias, AP_PlayerText);
                     g_array_append_val(messageparts_array, msg_p);
+                    appendLocationParts(messageparts_array, sender->game, json_object_get(v, "location"));
                     struct AP_ItemRecvMessage* msg = AP_ItemRecvMessage_new(item_name, sender->alias, ItemRecv, messagePartsToPlainText(messageparts_array), messageparts_array);
                     g_queue_push_tail(messageQueue, msg);
                 }
