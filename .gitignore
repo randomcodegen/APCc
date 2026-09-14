@@ -1,0 +1,14 @@
+# Ignore all
+*
+
+# Unignore directories
+!*/
+
+# Unignore source code files
+!APCc.c
+!APCc.h
+/bak_x64
+
+# Track the dependency build recipe and its inclusion rules.
+!.gitignore
+!cmake/libwebsockets/CMakeLists.txt

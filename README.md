@@ -1,39 +1,41 @@
-How to use the lib in your project:
+# APCc
 
-1) Clone the vcpkg repo and install the required packages
-   - git clone https://github.com/microsoft/vcpkg.git
-   - cd vcpkg && bootstrap-vcpkg.bat
-   - .\vcpkg.exe integrate install
-   - .\vcpkg install jansson
-   - .\vcpkg install libwebsockets
-   - .\vcpkg install glib
+A C port of [APCpp](https://github.com/N00byKing/APCpp) for Archipelago clients.
 
-2) Compile libwebsockets with extensions:
-   -  edit .\vcpkg\ports\libwebsockets\portfile.cmake
-   -  to cmake_configure options add the flag -DLWS_WITHOUT_EXTENSIONS=OFF
+## Build
 
-4) Create a visual studio project and add APCc.c + APCc.h
+Requires CMake 3.24+, GLib, Jansson, OpenSSL and zlib. 
+Install those dependencies with your package manager. 
+The included recipe builds a pinned, unpatched
+libwebsockets version with compression enabled and the connection fixes included.
 
-5) Add additional include directory ``$(_ZVcpkgCurrentInstalledDir)/include/glib-2.0;$(_ZVcpkgCurrentInstalledDir)/lib/glib-2.0/include;``
+Compile `APCc.c` into your client, link GLib and Jansson, and add:
 
+```cmake
+add_subdirectory("${APCC_ROOT}/cmake/libwebsockets"
+                 "${CMAKE_CURRENT_BINARY_DIR}/apcc-libwebsockets")
+target_link_libraries(your_client PRIVATE websockets)
+```
+
+The target provides libwebsockets and its dependencies. 
+In vcpkg manifests, replace `libwebsockets` with `openssl` and `zlib`. 
+Rebuild the client after updating APCc.
+
+### Native Visual Studio projects
+
+Build and install libwebsockets separately:
+
+```powershell
+cmake -S C:/path/to/APCc/cmake/libwebsockets -B build-lws -A x64 -DCMAKE_TOOLCHAIN_FILE=C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_MANIFEST_MODE=OFF
+cmake --build build-lws --config Release --target websockets
+cmake --install build-lws --config Release --prefix C:/path/to/lws-install
+```
+
+Use the installed headers and `websockets_static.lib`, plus OpenSSL, zlib and Windows system libraries. 
 
 ## License
 
-APCc is a C port of [APCpp](https://github.com/N00byKing/APCpp), by N00byKing
-and contributors. The C port and modifications are Copyright (c) 2024-2026
-randomcodegen. The library is licensed under the GNU Lesser General Public
-License version 2.1 (`LGPL-2.1-only`); see [LICENSE](LICENSE), reproduced from
-APCpp. The upstream attribution and license are retained for the derived code.
-License and source-file notices are restored on 2026-09-08.
+LGPL-2.1-only; see [LICENSE](LICENSE). Based on APCpp by N00byKing and contributors.
+C port and modifications copyright (c) 2024-2026 randomcodegen.
 
-This library is provided without warranty, including any implied warranty of
-merchantability or fitness for a particular purpose. Jansson, GLib,
-libwebsockets and their dependencies retain their own licenses.
-
-When distributing binaries, include the required notices and provide the
-corresponding modified library sources and build scripts. For statically
-linked applications, also provide the application source and/or object files
-and other materials needed to relink with modified libraries, following
-LGPL 2.1 section 6. Recipients may modify the library and reverse engineer
-the application to debug those modifications. Publish matching source and
-relinking materials alongside each binary release.
+When distributing binaries, include license notices, corresponding library sources and build scripts, and the materials required to relink modified libraries under LGPL 2.1. Dependencies retain their own licenses.
