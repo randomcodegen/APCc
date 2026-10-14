@@ -412,6 +412,16 @@ bool connected = false;
 bool multiworld = true;
 bool isSSL = true;
 bool ssl_success = false;
+
+static bool plaintext_tls_error(const char* reason) {
+    if (reason && (strstr(reason, "certificate") || strstr(reason, "Certificate") ||
+                   strstr(reason, "X509") || strstr(reason, "hostname"))) return false;
+    return reason && (strstr(reason, "wrong version number") ||
+                      strstr(reason, "unknown protocol") ||
+                      strstr(reason, "packet length too long") ||
+                      strstr(reason, "SSL - An invalid SSL record was received"));
+}
+
 bool data_synced = false;
 gint ap_ready = false;
 int ap_player_id;
@@ -548,6 +558,7 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
         psd->is_processing = false;
         AP_LOCK();
         connected = true;
+        if (isSSL) ssl_success = true;
         AP_UNLOCK();
         break;
 
@@ -664,7 +675,10 @@ static int lws_callbacks(struct lws* wsi, enum lws_callback_reasons reason, void
         connected = false;
         web_socket = NULL;
         g_atomic_int_set(&connection_attempt_failed, TRUE);
-        isSSL = !isSSL;
+        if (isSSL && !ssl_success && plaintext_tls_error((const char*)in)) {
+            printf("AP: TLS protocol mismatch. Retrying with ws://.\n");
+            isSSL = false;
+        }
         AP_UNLOCK();
         break;
 
@@ -1122,6 +1136,7 @@ void AP_Init(const char* ip, int port, const char* game, const char* player_name
     ap_player_name = player_name;
     ap_passwd = passwd;
     isSSL = strcmp(ip, "localhost") && strcmp(ip, "127.0.0.1") && strcmp(ip, "::1");
+    ssl_success = false;
 
     //Connect to server
 

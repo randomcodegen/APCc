@@ -12,3 +12,4 @@
 # Track the dependency build recipe and its inclusion rules.
 !.gitignore
 !cmake/libwebsockets/CMakeLists.txt
+tests/*
